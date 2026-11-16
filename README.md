@@ -1,6 +1,6 @@
 # DTS GUI — user guide
 
-Version 3.19 (16 November 2026). Desktop application for the preprocessing
+Version 3.20 (16 November 2026). Desktop application for the preprocessing
 and the analysis of Silixa XT-DTS records (MIRAGE campaign, Lake Geneva).
 
 ## 1. Purpose
@@ -265,6 +265,7 @@ layout prototype and are no longer used; they can be deleted.
 
 | Version | Date | Changes |
 |---|---|---|
+| 3.20 | 16.11.2026 | The profiler data folder is renamed `SVP PROFILES` (was `STC PROFILES`): example of `default_paths_template.ini` updated (and the `stc` path of the personal `default_paths.ini`). |
 | 3.19 | 16.11.2026 | `default_paths.ini`: a key left empty or a path to a folder that does not exist is ignored (the field starts empty) and named in the log at start; quotes around a path are accepted. |
 | 3.18 | 16.11.2026 | Default folders moved out of the code into `default_paths.ini` (personal, ignored by git), read by the new module `default_paths.py`; the repository holds the blank `default_paths_template.ini`; README section *Default folders* explains the setup; the log says at start whether the file was found. No personal path remains in the code. |
 | 3.17 | 16.11.2026 | STC figures: the DTS − chain curves removed from the RMS panels (only the differences to the STC remain). |
