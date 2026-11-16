@@ -46,7 +46,7 @@ from gui_sections import MENUS, all_groups                 # noqa: E402
 from gui_widgets import FigurePanel, ParameterPanel        # noqa: E402
 import gui_widgets                                         # noqa: E402
 
-VERSION = "3.21"
+VERSION = "3.23"
 VERSION_DATE = "16.11.2026"
 dts_steps.core.WRITER = f"DTS GUI v{VERSION}"
 
@@ -139,6 +139,7 @@ class MainWindow(QMainWindow):
         self.actions = {}
         self.pages = {}               # id -> (ParameterPanel, FigurePanel)
         self.shared_panels = {}       # menu name -> shared FigurePanel
+        self.shared_channels = {}     # "pre" / "analysis" -> ticked channels
         self.map_selectors = []       # SpanSelectors on the T maps
         self.surface_selection = False
         self.done, self.outdated = set(), set()
@@ -328,6 +329,9 @@ class MainWindow(QMainWindow):
         self.left_stack.setMinimumWidth(340)
         left_layout.addWidget(self.left_stack, 1)
         self.right_stack = QStackedWidget()
+        # no minimum size for the figures: a figure larger than the area
+        # gets horizontal and vertical scroll bars
+        self.right_stack.setMinimumSize(120, 100)
         horizontal = QSplitter(Qt.Horizontal)
         self.horizontal = horizontal
         horizontal.addWidget(left)
@@ -419,8 +423,7 @@ class MainWindow(QMainWindow):
             panel.toggle_changed.connect(
                 lambda name, on, k=key: self.on_toggle(k, name, on))
             if key == "pre.2":
-                panel.fields["TIME_WINDOWS"].changed.connect(
-                    self.draw_fit_windows)
+                # the fit windows are shaded at the next Update plot
                 panel.fields["Z_SURFACE"].spin.valueChanged.connect(
                     lambda *_: self.draw_surface_line())
             for source, channels in self.channel_sources.items():
@@ -428,9 +431,19 @@ class MainWindow(QMainWindow):
             panel.set_window_choices(self.window_items)
             panel.set_layer_choices(self.layer_items)
             panel.set_profile_choices(self.shared_profiles or [])
-            if "TIME_WINDOW" in panel.fields:
-                panel.fields["TIME_WINDOW"].currentTextChanged.connect(
-                    self.draw_analysis_windows)
+            # channels ticked in one step: same ticks in every step
+            for name, spec in panel.specs.items():
+                if spec["kind"] == "channels" and name in ("CHANNELS",
+                                                           "MAP_CHANNELS"):
+                    source = spec.get("choices")
+                    if not isinstance(source, str):   # fixed list
+                        continue
+                    if source in self.shared_channels:
+                        self._apply_channels(panel, source,
+                                             self.shared_channels[source])
+                    panel.fields[name].changed.connect(
+                        lambda k=key, n=name, src=source:
+                        self.sync_channels(k, n, src))
 
             if key in self.PROFILE_TABLES:      # one shared list of profiles
                 table = panel.fields[self.PROFILE_TABLES[key]]
@@ -507,13 +520,16 @@ class MainWindow(QMainWindow):
         self.left_stack.setCurrentWidget(panel)
         self.fit_left_panel(panel)
         self.current = key
-        self.draw_analysis_windows()
         self.right_stack.setCurrentWidget(figure_panel)
         if figure_panel in self.shared_panels.values():
             section = self.section_by_id[key]
             figure_panel.set_description(section.get("description", ""))
             focus = [section["focus_owner"]] if section.get(
                 "focus_owner") else []
+            # only the figures of this step are shown by default
+            figure_panel.set_active_owners(
+                focus + [dts_steps.FIGURE_OWNER.get(step, step)
+                         for step in self.steps_of(key)])
             figure_panel.select_owner(focus + self.steps_of(key))
             for step in self.steps_of(key):
                 self.focus_figure(figure_panel, step)
@@ -533,6 +549,60 @@ class MainWindow(QMainWindow):
         position = keys.index(key)
         self.previous_button.setEnabled(position > 0)
         self.next_button.setEnabled(position < len(keys) - 1)
+
+    def update_step(self, step):
+        """Update plot: the figures of ``step`` (of every step of its panel
+        when ``step`` is a panel) are drawn again with the current settings
+        (channels, individual profiles, display) and the time windows are
+        shaded.  Nothing is redrawn before this button is pressed."""
+        targets = [step]
+        if step in self.section_by_id:
+            targets += self.steps_of(step)
+        replots = []
+        for target in targets:
+            replot = target + ".replot"
+            if replot not in dts_steps.STEPS or replot in replots:
+                continue
+            owner = dts_steps.FIGURE_OWNER.get(replot, target)
+            if owner in self.done or owner in self.session.figures:
+                replots.append(replot)
+        if replots and not self.busy_running():
+            self.run_steps(replots)        # the windows follow (step done)
+            return
+        if step.startswith("pre."):
+            self.draw_fit_windows()
+        else:
+            self.draw_analysis_windows()
+        if not replots and step not in ("pre.2",):
+            self.statusBar().showMessage(
+                "Nothing to redraw yet: run the step first (time windows "
+                "updated)")
+
+    # ---- channels shared by the steps ----------------------------------------
+    def _apply_channels(self, panel, source, ticked):
+        for name, spec in panel.specs.items():
+            if spec["kind"] == "channels" and spec.get("choices") == source \
+                    and name in ("CHANNELS", "MAP_CHANNELS"):
+                field = panel.fields[name]
+                kept = [c for c in ticked if c in field.boxes]
+                if kept and kept != field.value():
+                    field.set_value(kept)
+
+    def sync_channels(self, key, name, source):
+        """Channels ticked or unticked in one step: the same ticks in every
+        step of the same data (no figure is redrawn: Update plot does it)."""
+        if key not in self.pages or source is None:
+            return
+        ticked = self.pages[key][0].fields[name].value()
+        if not ticked:
+            return
+        self.shared_channels[source] = list(ticked)
+        for other, (panel, _) in self.pages.items():
+            if other != key:
+                self._apply_channels(panel, source, ticked)
+        self.statusBar().showMessage(
+            "Channels updated in every step: press Update plot (or Run) "
+            "to redraw")
 
     @staticmethod
     def focus_figure(figure_panel, owner):
@@ -564,6 +634,9 @@ class MainWindow(QMainWindow):
                     "plot first.")
                 return
             self.run_steps([key + ".replot" for key in done])
+            return
+        if steps.startswith("@update:"):         # Update plot of a step
+            self.update_step(steps.split(":", 1)[1])
             return
         if steps == "@run_saved_analysis":
             self.run_saved_analysis()
@@ -939,7 +1012,13 @@ class MainWindow(QMainWindow):
         """Run All of one panel (every step of the panel, in order)."""
         self.run_jobs(self.steps_of(key))
 
+    # the load step of each menu: shown at the end of a complete run
+    LOAD_SECTION = {"Preprocessing": "pre.1", "Data analysis": "ana.0"}
+
     def run_all(self, menu_name):
+        if self.busy_running():
+            return
+        self._end_section = self.LOAD_SECTION.get(menu_name.replace("&", ""))
         self.run_jobs([step for m, section in self.sections
                        if m == menu_name
                        for step in self.steps_of(section["id"])])
@@ -949,6 +1028,9 @@ class MainWindow(QMainWindow):
         read just before it starts (earlier steps may change the channel
         lists)."""
         self.queue = list(jobs)
+        keys = {job[0] for job in jobs}
+        if {"pre.1.load", "pre.3"} <= keys:   # complete preprocessing
+            self._end_section = "pre.1"
         for panel, _ in self.pages.values():
             panel.set_running(True)
         self.busy.show()
@@ -990,6 +1072,7 @@ class MainWindow(QMainWindow):
             self.next_job()
         else:
             self.queue = []
+            self._end_section = None        # failed / interrupted: stay
             self.on_finished()
 
     def on_step_started(self, key):
@@ -1110,6 +1193,7 @@ class MainWindow(QMainWindow):
 
     def update_channels(self, source, channels):
         self.channel_sources[source] = list(channels)
+        self.shared_channels.pop(source, None)   # new data: all ticked
         for panel, _ in self.pages.values():
             panel.set_channel_choices(source, channels)
 
@@ -1148,18 +1232,12 @@ class MainWindow(QMainWindow):
         self._update_marks()
 
     def on_finished(self):
-        if getattr(self, "_apply_saved_ticks", False):
-            self._apply_saved_ticks = False
-            ticks = getattr(self, "saved_ticks", [])
-            if ticks:
-                try:
-                    panel = self.figure_panel_for("ana.0")
-                    for key in list(panel.checked):
-                        panel.checked[key] = tuple(key) in ticks
-                    panel.rebuild_list()
-                    panel.refresh_tabs()
-                except Exception:              # noqa: BLE001
-                    pass
+        # complete run (Run All, saved analysis): back to the load step,
+        # whose figures alone are shown (the others are hidden)
+        end_section = getattr(self, "_end_section", None)
+        self._end_section = None
+        if end_section and end_section in self.section_by_id:
+            self.show_section(end_section)
         dts_steps.core.CANCEL.clear()
         self.interrupt_button.setEnabled(False)
         self.busy.hide()
@@ -1393,8 +1471,8 @@ class MainWindow(QMainWindow):
     def on_profile_sublist(self, owner, title, ticked):
         """Update plots with other profiles ticked: redraw the figures."""
         self.session.profile_selection = set(ticked)
-        if "ana.0.1" in self.done and not self.busy_running():
-            self.run_steps(["ana.0.replot"])
+        self.statusBar().showMessage(
+            "Press Update plot to draw the ticked profiles")
 
     # ---- analysis time windows ---------------------------------------------
     def on_windows_changed(self):
@@ -1420,7 +1498,7 @@ class MainWindow(QMainWindow):
             if row[1].strip() and row[2].strip()]
         for panel, _ in self.pages.values():
             panel.set_window_choices(self.window_items)
-        self.draw_analysis_windows()
+        # the windows are shaded at the next Update plot
 
     def attach_window_selection(self):
         from matplotlib.widgets import SpanSelector
@@ -1581,14 +1659,14 @@ class MainWindow(QMainWindow):
     def on_display_update(self, values):
         """Update plots: redraw the existing maps when the display options
         changed (the data are not computed again)."""
-        if values == getattr(self.session, "display", None):
-            return
         self.session.display = values
         panel = self.shared_panels["Preprocessing"]
         steps = [replot for owner, replot in self.REPLOT_STEPS.items()
                  if owner in panel.results]
         if steps and not self.busy_running():
             self.start([(step, None) for step in steps])
+        else:
+            self.draw_fit_windows()
 
     # ---- water surface on the Uncalibrated Profiles -------------------------
     def profiles_canvas(self):
@@ -1819,7 +1897,7 @@ class MainWindow(QMainWindow):
                  if key not in self.REPLAY_EXCLUDED]
         self.write_log("\n===== Run the saved analysis: " + "; ".join(
             self.step_label(job[0]) for job in jobs) + " =====\n")
-        self._apply_saved_ticks = True
+        self._end_section = "ana.0"
         self.start(jobs)
 
     def adapt_saved_params(self, key, params):

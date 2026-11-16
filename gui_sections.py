@@ -80,8 +80,22 @@ def display_group(step, extra=()):
                  "perceptually uniform; turbo: rainbow; gray: grey scale"),
         *extra,
         dict(name="_display_update", label="Update plot", kind="button",
-             step=step + ".replot"),
+             step="@update:" + step, tip=UPDATE_TIP),
     ])
+
+
+UPDATE_TIP = ("Redraw the figures of this step with the current settings: "
+              "channels, individual profiles, time windows (shaded on the "
+              "time maps) and display options. Changing these settings "
+              "does not redraw anything until this button is pressed")
+
+
+def update_group(step):
+    """'Display' group of the steps without display options: only the
+    Update button."""
+    return ("Display", [dict(name="_display_update", label="Update plot",
+                             kind="button", step="@update:" + step,
+                             tip=UPDATE_TIP)])
 
 
 def pre_channels():
@@ -390,6 +404,7 @@ PREPROCESSING = [
                 dict(name="_manual_run", label="Run", kind="button",
                      step="pre.2.2"),
             ]),
+            update_group("pre.2"),
         ],
     ),
     dict(
@@ -649,6 +664,7 @@ ANALYSIS = [
                                unit="°C", default=10.0),
                           dict(name="_run", label="Run", kind="button",
                                step="ana.2")]),
+            update_group("ana.2"),
         ],
     ),
     dict(
@@ -880,7 +896,8 @@ ANALYSIS = [
                              kind="choice", choices=["log", "linear"],
                              default="log"),
                         dict(name="_display_update", label="Update plot",
-                             kind="button", step="ana.3.2.replot"),
+                             kind="button", step="@update:ana.3.2",
+                             tip=UPDATE_TIP),
                     ]),
                 ]),
             ]),
@@ -1149,6 +1166,7 @@ ANALYSIS = [
                      tip="Seismogram-like plot of the profiles of the time "
                          "window"),
             ]),
+            update_group("ana.4.2.5"),
         ],
     ),
     dict(

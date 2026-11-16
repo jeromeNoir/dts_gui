@@ -279,7 +279,10 @@ def _old_names(names):
 
 
 class ChannelBoxes(QWidget):
-    """One check box per channel, with a (?) button (grid of 3 columns)."""
+    """One check box per channel, with a (?) button (grid of 3 columns).
+    ``changed`` is emitted when the user ticks or unticks a box."""
+
+    changed = Signal()
 
     def __init__(self, choices, default):
         super().__init__()
@@ -300,6 +303,7 @@ class ChannelBoxes(QWidget):
         for index, name in enumerate(choices):
             box = QCheckBox(name)
             box.setChecked(name in checked or not checked)
+            box.clicked.connect(lambda *_: self.changed.emit())
             self.boxes[name] = box
             cells.append(_channel_cell(box, name))
         self.cells = _place_cells(self.layout_, cells)
@@ -1494,8 +1498,13 @@ class FigurePanel(QWidget):
         self.order = list(section.get("actions") or [section["id"]])
         self.catalogue = list(catalogue)       # (owner, title, default)
         self.step_names = step_names or {}
-        self.checked = {(owner, title): bool(default)
+        # visibility: catalogue default, limited to the figures of the
+        # active step(s) (None: every step), unless shown / hidden by hand
+        self.default = {(owner, title): bool(default)
                         for owner, title, default in self.catalogue}
+        self.active = None
+        self.manual = {}
+        self.checked = dict(self.default)
         self.results = {}          # owner -> [(title, item)]
         self.sublists = {}         # (owner, title) -> {item name: ticked}
         self.pages = {}            # (owner, title) -> page widget
@@ -1607,8 +1616,9 @@ class FigurePanel(QWidget):
             page.deleteLater()
         self.results[owner] = list(figures)
         for title, item in figures:
-            self.checked.setdefault((owner, title), not self._in_catalogue(
+            self.default.setdefault((owner, title), not self._in_catalogue(
                 owner))           # titles outside the catalogue: shown
+            self.checked[(owner, title)] = self._visible((owner, title))
             page, canvas = self._make_page(item)
             self.pages[(owner, title)] = page
             if canvas is not None:
@@ -1707,10 +1717,31 @@ class FigurePanel(QWidget):
         (window.write_log if hasattr(window, "write_log") else print)(text)
         return files
 
+    def _visible(self, key):
+        """Shown by hand / hidden by hand, otherwise the default of the
+        figure if its step is active."""
+        if key in self.manual:
+            return self.manual[key]
+        if self.active is not None and key[0] not in self.active:
+            return False
+        return self.default.get(key, True)
+
+    def set_active_owners(self, owners):
+        """Only the figures of ``owners`` (the steps of the panel on the
+        left) are shown; the figures shown or hidden by hand in the
+        previous step return to that default."""
+        self.active = set(owners)
+        self.manual = {}
+        for key in set(self.checked) | set(self.default):
+            self.checked[key] = self._visible(key)
+        self.rebuild_list()
+        self.refresh_tabs()
+
     def show_figure(self, owner, title):
         """Tick one figure and bring its tab forward (False if it is not
         computed yet)."""
         self.checked[(owner, title)] = True
+        self.manual[(owner, title)] = True
         self.rebuild_list()
         self.refresh_tabs()
         page = self.pages.get((owner, title))
@@ -1928,7 +1959,10 @@ class FigurePanel(QWidget):
             item = self.figure_list.item(row)
             key = item.data(Qt.UserRole)
             if key:
-                self.checked[tuple(key)] = item.checkState() == Qt.Checked
+                on = item.checkState() == Qt.Checked
+                if self.checked.get(tuple(key)) != on:   # shown / hidden
+                    self.manual[tuple(key)] = on         # by hand
+                self.checked[tuple(key)] = on
             sub = item.data(Qt.UserRole + 1)
             if sub:
                 owner, title, name = sub
@@ -1947,6 +1981,7 @@ class FigurePanel(QWidget):
         if key is None:
             return
         self.checked[key] = False
+        self.manual[key] = False
         self.rebuild_list()
         self.refresh_tabs()
 
@@ -2010,13 +2045,18 @@ class FigurePanel(QWidget):
             page_layout.addWidget(table)
             return page, None
         canvas = FigureCanvasQTAgg(item)
-        # tall figures keep a readable height inside a scroll area
-        canvas.setMinimumHeight(int(item.get_figheight() * 75))
+        # the figure never shrinks below its own size: when the window is
+        # smaller, horizontal and vertical scroll bars appear (larger
+        # windows: the figure grows with them)
+        canvas.setMinimumSize(int(item.get_figwidth() * 75),
+                              int(item.get_figheight() * 75))
         canvas.mpl_connect("button_press_event", self._on_click)
         toolbar = NavigationToolbar2QT(canvas, page)
         self.toolbars[id(canvas)] = toolbar
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(canvas)
         page_layout.addWidget(toolbar)

@@ -35,7 +35,14 @@ of the step is shown in grey below the figures); the <b>Run</b> (or <b>Save</b>,
 <b>Update</b>) buttons sit in the box whose inputs they use. <b>Reset</b>
 (bottom left) puts the inputs of the panel back to their default values.</li>
 <li><b>Figures</b>: the results of all the steps of a menu are gathered in
-one set of tabs, which stay open when moving from one step to another. The
+one set of tabs. By default only the figures of the current step are shown
+and all the others are hidden; any figure of the menu can still be shown,
+hidden or brought forward by hand from any step (list or right click), until
+another step is chosen. After a complete run (the saved analysis, or the
+whole preprocessing from Load to Save) the GUI returns to the load step and
+only its figures are shown. A figure keeps its own size: when the window is
+smaller, horizontal and vertical scroll bars appear (the window itself has
+no minimum size for the figures). The
 list on the right selects the figures shown: <i>All figures</i>, then one
 header per step, its figures and (for <i>Individual profiles</i>) one item
 per profile, each check box indented with its name. A figure is shown or
@@ -288,7 +295,10 @@ they have not run.</p>
 <li><b>Channels</b> (first box of most steps): tick boxes, one per channel
 of the file (<code>CH1</code>, <code>CH3</code>, <code>Combined</code>, …,
 and the <code>-resampled</code> channels made by Resampling data), each with
-a (?) explaining how it is built. Every step keeps its own selection; <b>Next</b> carries the channels ticked (and the LéXPLORE choice) to the next step, where other channels can still be ticked before running it.</li>
+a (?) explaining how it is built. Ticking or unticking a channel in one
+step ticks or unticks it in every step (preprocessing and analysis apart);
+no figure is redrawn until <b>Update plot</b> (or <b>Run</b>) is pressed in
+a step.</li>
 <li><b>Include the LéXPLORE chain</b>: adds the thermistor chain as one more
 record. Its (?) describes its sampling: 27 sensors at 0.25, 1, 2, 4 … 16, 18,
 21, 24, 27, 30 m, then every 5 m to 90 m; one profile every 10 minutes. In
@@ -326,7 +336,13 @@ overlapping windows.</li>
 <li><b>Display</b> (steps that draw maps): <i>Smooth shading</i>,
 <i>Shading kind</i>, <i>Colour map</i> (<i>default</i> = the colour map of
 each figure) and the options of the step; <b>Update plot</b> redraws the
-figures without marking the other steps as outdated.</li>
+figures of the step with the current channels, individual profiles and time
+windows (shaded on the time maps) without marking the other steps as
+outdated. Every step has this button (steps without display options: a
+<b>Display</b> box with the button only). Adding a time window or an
+individual profile, or changing the channels, redraws nothing by itself:
+the figures follow at the next <b>Update plot</b>, so that editing stays
+fast after a complete processing.</li>
 <li><b>Settings</b>: <i>Save analysis settings…</i> (bottom of the Data
 analysis menu) writes a JSON file with the inputs of every analysis panel
 (tick boxes, choices, tables, time windows, individual profiles), the list
@@ -357,8 +373,8 @@ runs every step recorded in the settings, in the same order and with the
 same inputs, so that a whole analysis is repeated on another data set in one
 click. Channels that do not exist in the new data are left out (all the
 channels when none remains; a single channel becomes <code>Combined</code>);
-the panels show the inputs used, and the figures ticked when the settings
-were saved are ticked again at the end.</li>
+the panels show the inputs used; at the end the GUI returns to this step
+and only its figures are shown (the others are in the figure list).</li>
 <li>The other boxes appear after loading. <b>Maps</b>: <i>Channels on the
 maps</i> (all ticked after loading; only the maps and individual profiles of
 this panel), <i>Include the LéXPLORE chain</i>, <i>Time window</i>;
@@ -385,7 +401,7 @@ deviation of the temperature on the fibre inside the XT (x from −20 to
 chain), with the individual profiles marked; <i>Individual profiles</i>: one
 panel per profile T(z), three columns at most, every channel at its profile
 nearest in time. In the figure list, this figure has one item per profile;
-ticking or unticking one redraws the figure with the profiles ticked.</li>
+the profiles ticked are drawn at the next <b>Update plot</b>.</li>
 </ul>
 
 <h2>Resampling data</h2>
