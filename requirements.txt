@@ -1,0 +1,8 @@
+PySide6>=6.5
+numpy
+pandas
+matplotlib>=3.7
+netCDF4
+tzdata
+h5py
+scipy

@@ -1,0 +1,9 @@
+# Python caches: rebuilt automatically by Python on every machine
+__pycache__/
+*.pyc
+# macOS folder files
+.DS_Store
+# settings saved by the GUI (paths and choices of one data set)
+*.json
+# personal default folders (copy default_paths_template.ini to set them)
+default_paths.ini
