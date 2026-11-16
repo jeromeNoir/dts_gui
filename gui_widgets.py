@@ -1487,6 +1487,7 @@ class FigurePanel(QWidget):
     clicked = Signal(str, float, float)   # owner step, data coordinates
     display_requested = Signal(dict)      # display options, Update plots
     sublist_requested = Signal(str, str, list)  # owner, title, ticked items
+    figures_shown = Signal(list)          # (owner, title) hidden -> shown
 
     COLOUR_MAPS = ["seismic", "coolwarm", "RdBu_r", "viridis", "plasma",
                    "inferno", "magma", "cividis", "turbo", "gray"]
@@ -1504,6 +1505,9 @@ class FigurePanel(QWidget):
                         for owner, title, default in self.catalogue}
         self.active = None
         self.manual = {}
+        # figures shown in every step of the menu (e.g. the configuration)
+        self.pinned = {(owner, title) for owner, title, _ in self.catalogue
+                       if (owner, title) in self.PINNED}
         self.checked = dict(self.default)
         self.results = {}          # owner -> [(title, item)]
         self.sublists = {}         # (owner, title) -> {item name: ticked}
@@ -1547,6 +1551,8 @@ class FigurePanel(QWidget):
         self._delegate = IndentDelegate(self.figure_list)  # keep ref
         self.figure_list.setItemDelegate(self._delegate)
         self.figure_list.itemChanged.connect(self._on_item_changed)
+        self.figure_list.itemClicked.connect(self._on_item_clicked)
+        self._just_toggled = False
         self.figure_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.figure_list.customContextMenuRequested.connect(
             self._figure_menu)
@@ -1637,17 +1643,27 @@ class FigurePanel(QWidget):
         if item is None:
             return
         key = item.data(Qt.UserRole)
-        if not key:                      # header or individual profile:
-            return                       # tick boxes only
-        owner, title = tuple(key)
-        shown = item.checkState() == Qt.Checked
+        sub = item.data(Qt.UserRole + 1)
+        shown = item.checkState() != Qt.Unchecked
         menu = QMenu(self)
-        toggle = menu.addAction("Hide" if shown else "Show")
-        focus = menu.addAction("Focus")
+        if not key and not sub:          # header: every figure below it
+            toggle = menu.addAction("Hide all" if shown else "Show all")
+            chosen = menu.exec(
+                self.figure_list.viewport().mapToGlobal(position))
+            if chosen is toggle:
+                item.setCheckState(Qt.Unchecked if shown else Qt.Checked)
+            return
+        # an individual profile (P1, P2, ...): Show / Hide that profile;
+        # Focus and Save data act on the figure that holds it
+        owner, title = tuple(sub[:2]) if sub else tuple(key)
+        toggle = menu.addAction(("Hide" if shown else "Show")
+                                + (f" {sub[2]}" if sub else ""))
+        focus = menu.addAction("Focus" + (f" '{title}'" if sub else ""))
         computed = (owner, title) in self.pages
         focus.setEnabled(computed)
         menu.addSeparator()
-        save = menu.addAction("Save data…")
+        save = menu.addAction("Save data…" + (f" of '{title}'" if sub
+                                               else ""))
         save.setEnabled(computed)
         if not computed:
             focus.setToolTip("not computed yet: run the step")
@@ -1661,9 +1677,11 @@ class FigurePanel(QWidget):
             self.figure_action(item, "save")
 
     def figure_action(self, item, action):
-        """'toggle': show a hidden figure or hide a shown one; 'focus':
-        show it and bring its tab forward."""
-        owner, title = tuple(item.data(Qt.UserRole))
+        """'toggle': show a hidden figure (or profile) or hide a shown one;
+        'focus': show the figure and bring its tab forward."""
+        sub = item.data(Qt.UserRole + 1)
+        owner, title = tuple(sub[:2]) if sub else tuple(
+            item.data(Qt.UserRole))
         if action == "toggle":
             shown = item.checkState() == Qt.Checked
             item.setCheckState(Qt.Unchecked if shown else Qt.Checked)
@@ -1717,14 +1735,32 @@ class FigurePanel(QWidget):
         (window.write_log if hasattr(window, "write_log") else print)(text)
         return files
 
+    pending_focus = None
+
+    def focus_pending(self, owner, clear=True):
+        """Bring forward the figure waiting for focus (e.g. Individual
+        profiles after a profile was ticked) once ``owner`` has drawn it."""
+        key = self.pending_focus
+        if key is None or key[0] != owner:
+            return
+        page = self.pages.get(key)
+        if page is not None and self.tabs.indexOf(page) >= 0:
+            self.tabs.setCurrentWidget(page)
+            if clear:
+                self.pending_focus = None
+
     def _visible(self, key):
         """Shown by hand / hidden by hand, otherwise the default of the
         figure if its step is active."""
         if key in self.manual:
             return self.manual[key]
+        if key in self.pinned:
+            return True
         if self.active is not None and key[0] not in self.active:
             return False
         return self.default.get(key, True)
+
+    PINNED = {("pre.1.load", "Configuration")}
 
     def set_active_owners(self, owners):
         """Only the figures of ``owners`` (the steps of the panel on the
@@ -1833,8 +1869,10 @@ class FigurePanel(QWidget):
                     item.setForeground(QBrush(QColor("gray")))
                     item.setToolTip("not available yet: run the step")
                 self.figure_list.addItem(item)
+                parent_on = bool(self.checked.get((owner, title)))
                 for name, on in self.sublists.get((owner, title),
                                                   {}).items():
+                    on = on and parent_on      # figure hidden: all off
                     sub = QListWidgetItem(name)
                     sub.setData(INDENT_ROLE, level + 1)
                     sub.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
@@ -1875,9 +1913,30 @@ class FigurePanel(QWidget):
                     self._figure_items(tuple(group)[1])))
         self._syncing = False
 
+    def _on_item_clicked(self, item):
+        """A click on a figure name (or a profile of it) brings the figure
+        forward; a click on a hidden figure's name shows it.  A click on the
+        check box only ticks or unticks."""
+        toggled, self._just_toggled = self._just_toggled, False
+        sub = item.data(Qt.UserRole + 1)
+        key = tuple(sub[:2]) if sub else item.data(Qt.UserRole)
+        if not key:
+            return                                  # header
+        key = tuple(key)
+        if key not in self.pages:
+            return                                  # not computed yet
+        if toggled:
+            if item.checkState() == Qt.Checked:     # just ticked: forward
+                page = self.pages[key]
+                if self.tabs.indexOf(page) >= 0:
+                    self.tabs.setCurrentWidget(page)
+            return
+        self.show_figure(*key)
+
     def _on_item_changed(self, item):
         if self._syncing:
             return
+        self._just_toggled = True
         group = item.data(self.GROUP_ROLE)
         key = item.data(Qt.UserRole)
         sub = item.data(Qt.UserRole + 1)
@@ -1889,6 +1948,19 @@ class FigurePanel(QWidget):
                 data = other.data(Qt.UserRole + 1)
                 if data and tuple(data[:2]) == tuple(key):
                     other.setCheckState(item.checkState())
+            self._syncing = False
+        elif sub and item.checkState() == Qt.Unchecked and not any(
+                self.figure_list.item(row).checkState() == Qt.Checked
+                for row in range(self.figure_list.count())
+                if tuple((self.figure_list.item(row).data(Qt.UserRole + 1)
+                          or (None, None))[:2]) == tuple(sub[:2])):
+            # the last profile unticked: its figure is hidden too
+            self._syncing = True
+            for row in range(self.figure_list.count()):
+                other = self.figure_list.item(row)
+                data = other.data(Qt.UserRole)
+                if data and tuple(data) == tuple(sub[:2]):
+                    other.setCheckState(Qt.Unchecked)
             self._syncing = False
         elif sub and item.checkState() == Qt.Checked:
             # ticking one item of a sub-list ticks its figure
@@ -1920,7 +1992,8 @@ class FigurePanel(QWidget):
         """Tickable sub-items of one figure (e.g. one per individual
         profile); a new name is ticked, the known ones keep their tick."""
         old = self.sublists.get((owner, title), {})
-        self.sublists[(owner, title)] = {name: old.get(name, True)
+        default = bool(self.checked.get((owner, title)))
+        self.sublists[(owner, title)] = {name: old.get(name, default)
                                          for name in names}
         self.rebuild_list()
 
@@ -1954,7 +2027,7 @@ class FigurePanel(QWidget):
     def apply_ticks(self):
         """Show the ticked figures and hide the others (called at once
         when a box of the list is ticked or unticked)."""
-        changed = set()
+        changed, shown = set(), []
         for row in range(self.figure_list.count()):
             item = self.figure_list.item(row)
             key = item.data(Qt.UserRole)
@@ -1962,6 +2035,8 @@ class FigurePanel(QWidget):
                 on = item.checkState() == Qt.Checked
                 if self.checked.get(tuple(key)) != on:   # shown / hidden
                     self.manual[tuple(key)] = on         # by hand
+                    if on and tuple(key) in self.pages:
+                        shown.append(tuple(key))
                 self.checked[tuple(key)] = on
             sub = item.data(Qt.UserRole + 1)
             if sub:
@@ -1971,7 +2046,12 @@ class FigurePanel(QWidget):
                     self.sublists[(owner, title)][name] = on
                     changed.add((owner, title))
         self.refresh_tabs()
+        if shown:                          # brought up to date at once
+            self.figures_shown.emit(shown)
         for owner, title in changed:
+            if self.sublist_ticked(owner, title):   # its figure comes
+                self.pending_focus = (owner, title)  # forward when redrawn
+                self.focus_pending(owner, clear=False)
             self.sublist_requested.emit(owner, title,
                                         self.sublist_ticked(owner, title))
 
@@ -2006,6 +2086,9 @@ class FigurePanel(QWidget):
                 if self.tabs.indexOf(page) >= 0:
                     self.tabs.removeTab(self.tabs.indexOf(page))
                 self.tabs.insertTab(position, page, key[1])
+        if not wanted and not self.results:
+            self.tabs.tabBar().hide()       # nothing computed yet: empty
+            return
         if not wanted:
             text = getattr(self, "empty_message", "") or (
                 "No figure shown: tick figures in the list on the right and "

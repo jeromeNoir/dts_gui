@@ -1065,7 +1065,57 @@ def ana_0(session, p):
                         A_PRODUCT=product, A_CHAIN_ALL=chain,
                         A_RESAMPLE_WARNING=warning)
     print(f"available: {', '.join(available)}")
-    return []
+    table = analysis_configuration(product, entries, chain)
+    session.data["A_CONFIGURATION_TABLE"] = table
+    return [("Configuration", table)]
+
+
+def analysis_configuration(product, entries, chain):
+    """Table of the data loaded (one column per channel): files, record,
+    sampling, depth grid and the calibration stored in the file."""
+    import pandas as pd
+
+    def utc(value):
+        return str(np.datetime64(value, "s")).replace("T", " ")
+
+    def per_record(values):
+        if isinstance(values, dict):
+            return "; ".join(f"{v:+.3f}" if len(values) == 1 else
+                             f"{k}: {v:+.3f}" for k, v in values.items())
+        return f"{values:+.3f}" if values is not None else ""
+
+    table = {}
+    for channel, time in product["TIME"].items():
+        z = np.asarray(product["Z_CALIBRATED"][channel])
+        steps = np.diff(time).astype("timedelta64[ms]").astype(float) / 1e3
+        column = {
+            "files": "; ".join(entries),
+            "profiles": int(time.size),
+            "first profile (UTC)": utc(time[0]) if time.size else "",
+            "last profile (UTC)": utc(time[-1]) if time.size else "",
+            "sampling period (s)": (f"{np.median(steps):.0f}"
+                                    if steps.size else ""),
+            "depths (m)": (f"{z[0]:.2f} – {z[-1]:.2f} ({z.size} levels)"
+                           if z.size else ""),
+            "depth spacing (m)": (f"{np.median(np.diff(z)):.3f}"
+                                  if z.size > 1 else ""),
+            "z shift (m)": per_record(product["Z_SHIFT"].get(channel)),
+            "z shift std (m)": per_record(
+                product["Z_SHIFT_STD"].get(channel)),
+            "T shift (K)": per_record(product["T_SHIFT"].get(channel)),
+            "T shift std (K)": per_record(
+                product["T_SHIFT_STD"].get(channel)),
+        }
+        table[channel] = column
+    frame = pd.DataFrame(table)
+    frame.loc["time correction"] = ("yes" if product.get(
+        "IS_TIME_CORRECTION") else "no (instrument clock)")
+    frame.loc["calibration"] = ("LeXPLORE chain" if product.get(
+        "IS_LEXPLORE_DATA_AVAILABLE") else "manual (water surface)")
+    frame.loc["LeXPLORE chain"] = (
+        f"{len(chain['time'])} profiles loaded" if chain
+        and len(chain.get("time", [])) else "not available")
+    return frame
 
 
 RESAMPLED_SUFFIX = "-resampled"
@@ -1381,8 +1431,8 @@ def load_data_figures(session, p):
     profiles = [(label, when) for (label, text), (_, when) in
                 zip([r for r in p.get("PROFILE_TIMES", []) if str(r[1]).strip()],
                     instants(p.get("PROFILE_TIMES", [])))
-                if selection is None
-                or profile_item_name(label, text) in selection]
+                if not selection           # none ticked (figure hidden):
+                or profile_item_name(label, text) in selection]   # all
     if profiles:
         figures.append(("Individual profiles",
                         figs.individual_profiles(

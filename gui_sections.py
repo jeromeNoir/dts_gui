@@ -508,7 +508,8 @@ ANALYSIS = [
         actions=["ana.0", "ana.0.1"],
         hidden_groups=["Maps", "Time windows",
                        "Select Individual profiles", "Display"],
-        figures=[("ana.0.1", "T(z, t) maps", True),
+        figures=[("ana.0", "Configuration", True),
+                 ("ana.0.1", "T(z, t) maps", True),
                  ("ana.0.1", "Individual profiles", False)],
         description=(
             "Choose the root folder of the preprocessed data, the "

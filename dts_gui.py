@@ -46,7 +46,7 @@ from gui_sections import MENUS, all_groups                 # noqa: E402
 from gui_widgets import FigurePanel, ParameterPanel        # noqa: E402
 import gui_widgets                                         # noqa: E402
 
-VERSION = "3.23"
+VERSION = "3.30"
 VERSION_DATE = "16.11.2026"
 dts_steps.core.WRITER = f"DTS GUI v{VERSION}"
 
@@ -395,7 +395,7 @@ class MainWindow(QMainWindow):
                  "pre.1.concat": "Concatenate", "pre.1.replot": "Update plots",
                  "pre.3.replot": "Update plots",
                  "pre.2.1": "Using LeXPLORE T-Chain", "pre.2.2": "Manual",
-                 "ana.0": "Load data", "ana.0.1": "Load data",
+                 "ana.0": "Load data", "ana.0.1": "Maps and profiles",
                  "ana.0.select": "Update maps",
                  "ana.3.1": "FFT of the temperature at each depth",
                  "ana.3.2": "FFT of the depth of an isotherm",
@@ -510,6 +510,8 @@ class MainWindow(QMainWindow):
                 panel.clicked.connect(self.on_profile_click)
             if menu == "Preprocessing":
                 panel.display_requested.connect(self.on_display_update)
+            panel.figures_shown.connect(
+                lambda keys, m=menu: self.on_figures_shown(m, keys))
             self.shared_panels[menu] = panel
         return self.shared_panels[menu]
 
@@ -577,6 +579,14 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Nothing to redraw yet: run the step first (time windows "
                 "updated)")
+
+    def on_figures_shown(self, menu, keys):
+        """A hidden figure shown again: its time windows are brought up
+        to date at once (nothing is computed again)."""
+        if menu == "Preprocessing":
+            self.draw_fit_windows()
+        else:
+            self.draw_analysis_windows()
 
     # ---- channels shared by the steps ----------------------------------------
     def _apply_channels(self, panel, source, ticked):
@@ -650,7 +660,29 @@ class MainWindow(QMainWindow):
         if steps.startswith("@save_settings:"):
             self.save_settings(steps.split(":", 1)[1])
             return
+        if steps == "ana.0.instants":          # Update of the profiles:
+            self.show_individual_profiles()    # their figure, in front
         self.run_steps(steps.split("|"))
+
+    def show_individual_profiles(self):
+        """Update of Select individual profiles: every profile of the table
+        ticked in the figure list, the figure Individual profiles shown and
+        brought forward once drawn."""
+        if "ana.0" not in self.pages:
+            return
+        figure_panel = self.pages["ana.0"][1]
+        key = ("ana.0.1", "Individual profiles")
+        self.update_profile_sublist()
+        names = list(figure_panel.sublists.get(key, {}))
+        if not names:
+            return
+        figure_panel.sublists[key] = {name: True for name in names}
+        figure_panel.checked[key] = True
+        figure_panel.manual[key] = True
+        figure_panel.pending_focus = key
+        figure_panel.rebuild_list()
+        figure_panel.refresh_tabs()
+        self.session.profile_selection = set(names)
 
     def reset_all(self):
         """File › Reset all: every loaded, preprocessed and analysis
@@ -1114,6 +1146,7 @@ class MainWindow(QMainWindow):
         figure_panel.set_figures(
             owner, figures, "Done: this step makes no figure (see the log).")
         self.focus_figure(figure_panel, owner)
+        figure_panel.focus_pending(owner)     # e.g. a profile just ticked
         if owner.startswith("pre."):          # windows on every time map
             self.draw_fit_windows()
         elif owner.startswith("ana."):
@@ -1471,8 +1504,8 @@ class MainWindow(QMainWindow):
     def on_profile_sublist(self, owner, title, ticked):
         """Update plots with other profiles ticked: redraw the figures."""
         self.session.profile_selection = set(ticked)
-        self.statusBar().showMessage(
-            "Press Update plot to draw the ticked profiles")
+        if "ana.0.1" in self.done and not self.busy_running():
+            self.run_steps(["ana.0.replot"])   # the figure follows at once
 
     # ---- analysis time windows ---------------------------------------------
     def on_windows_changed(self):

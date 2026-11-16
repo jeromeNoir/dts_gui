@@ -38,7 +38,8 @@ of the step is shown in grey below the figures); the <b>Run</b> (or <b>Save</b>,
 one set of tabs. By default only the figures of the current step are shown
 and all the others are hidden; any figure of the menu can still be shown,
 hidden or brought forward by hand from any step (list or right click), until
-another step is chosen. After a complete run (the saved analysis, or the
+another step is chosen. The <i>Configuration</i> table of Load raw data
+stays shown in every step of the preprocessing. After a complete run (the saved analysis, or the
 whole preprocessing from Load to Save) the GUI returns to the load step and
 only its figures are shown. A figure keeps its own size: when the window is
 smaller, horizontal and vertical scroll bars appear (the window itself has
@@ -46,11 +47,13 @@ no minimum size for the figures). The
 list on the right selects the figures shown: <i>All figures</i>, then one
 header per step, its figures and (for <i>Individual profiles</i>) one item
 per profile, each check box indented with its name. A figure is shown or
-hidden as soon as its box is ticked or unticked; a header ticks or unticks
+hidden as soon as its box is ticked or unticked; a click on its name brings
+its tab forward (showing it first if it was hidden); a header ticks or unticks
 all the figures below it (partly ticked when only some are). A right click
 on a figure name opens <i>Show</i> / <i>Hide</i> (tick or untick it) and
 <i>Focus</i> (show it and bring its tab forward; only for a figure already
-computed) and <i>Save data…</i> (the data drawn on the figure — curves,
+computed; on an individual profile P1, P2, …: Show / Hide that profile, and
+Focus / Save data of its figure; on a header: Show all / Hide all) and <i>Save data…</i> (the data drawn on the figure — curves,
 maps with their x and y, shaded areas, points, labels, axis titles, one
 group per panel — written to a file whose name, folder and format are
 asked: npz, NetCDF, HDF5, txt, csv or MATLAB; times in UTC: datetime64 in
@@ -342,7 +345,9 @@ outdated. Every step has this button (steps without display options: a
 <b>Display</b> box with the button only). Adding a time window or an
 individual profile, or changing the channels, redraws nothing by itself:
 the figures follow at the next <b>Update plot</b>, so that editing stays
-fast after a complete processing.</li>
+fast after a complete processing (exceptions: ticking an individual profile
+in the figure list redraws its figure at once, and a figure shown again
+gets its time windows at once).</li>
 <li><b>Settings</b>: <i>Save analysis settings…</i> (bottom of the Data
 analysis menu) writes a JSON file with the inputs of every analysis panel
 (tick boxes, choices, tables, time windows, individual profiles), the list
@@ -390,18 +395,27 @@ once.</li>
 <li><b>Select Individual profiles</b>: the shared profile table; the toggle
 <i>Select profiles on the T(z, t) map</i> adds the nearest profile on a
 click; <b>Update</b> marks the profiles as dashed lines on the maps and
-redraws the <i>Individual profiles</i> figure.</li>
+redraws the <i>Individual profiles</i> figure with every profile of the
+table ticked, and brings that figure forward.</li>
 <li><b>Display</b>: shading and colour map; <b>Update plot</b>.</li>
 <li>The <b>instrument resolution</b> of each channel (used by the options
 <i>Instrument resolution</i> of the spectral steps) is the standard
 deviation of the temperature on the fibre inside the XT (x from −20 to
 −5 m) in the raw files of the configuration; for <code>Combined</code>,
 √(r₁² + r₂² + …)/n.</li>
-<li><b>Results</b>: <i>T(z, t) maps</i> of the channels ticked (and the
+<li><b>Results</b>: <i>Configuration</i> (first in the figure list, under
+<i>Load data</i>): one column per channel with the files, the number of
+profiles, first and last profile (UTC), sampling period, depths and depth
+spacing, z and T shifts ± std stored in the file, time correction,
+calibration kind and the LéXPLORE chain loaded; <i>T(z, t) maps</i> of the channels ticked (and the
 chain), with the individual profiles marked; <i>Individual profiles</i>: one
 panel per profile T(z), three columns at most, every channel at its profile
 nearest in time. In the figure list, this figure has one item per profile;
-the profiles ticked are drawn at the next <b>Update plot</b>.</li>
+ticking or unticking one (box or right click) redraws the figure at once
+with the profiles ticked and brings it forward; unticking the figure
+unticks all its profiles (and unticking the last profile hides the figure),
+ticking one profile shows the figure. The figure is computed whenever the
+table has profiles, even while hidden.</li>
 </ul>
 
 <h2>Resampling data</h2>
