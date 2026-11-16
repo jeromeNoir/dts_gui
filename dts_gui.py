@@ -46,7 +46,7 @@ from gui_sections import MENUS, all_groups                 # noqa: E402
 from gui_widgets import FigurePanel, ParameterPanel        # noqa: E402
 import gui_widgets                                         # noqa: E402
 
-VERSION = "3.20"
+VERSION = "3.21"
 VERSION_DATE = "16.11.2026"
 dts_steps.core.WRITER = f"DTS GUI v{VERSION}"
 
@@ -1215,7 +1215,17 @@ class MainWindow(QMainWindow):
     @staticmethod
     def shade_windows(canvas, axes, windows, colour, selected=None):
         """Shade time windows [(label, t0, t1)] on map axes (labels at the
-        top; the selected one darker); the previous shading is removed."""
+        top; the selected one darker); the previous shading is removed.
+        Nothing is redrawn when the windows of this map have not changed:
+        redrawing every time-depth map at each change of step made the GUI
+        slow once many maps existed."""
+        key = (tuple((label, str(t0), str(t1)) for label, t0, t1 in windows),
+               colour, selected, tuple(id(ax) for ax in axes))
+        if getattr(canvas, "window_key", None) == key:
+            return
+        canvas.window_key = key
+        if not windows and not getattr(canvas, "window_artists", []):
+            return                     # nothing drawn before, nothing to draw
         for artist in getattr(canvas, "window_artists", []):
             try:
                 artist.remove()
