@@ -46,7 +46,7 @@ from gui_sections import MENUS, all_groups                 # noqa: E402
 from gui_widgets import FigurePanel, ParameterPanel        # noqa: E402
 import gui_widgets                                         # noqa: E402
 
-VERSION = "3.30"
+VERSION = "3.32"
 VERSION_DATE = "16.11.2026"
 dts_steps.core.WRITER = f"DTS GUI v{VERSION}"
 
@@ -90,6 +90,8 @@ class Worker(QThread):
             function = dts_steps.STEPS[self.key][0]
             self.session.params_used[self.key] = dict(self.params)
             before = set(self.session.data)
+            used = set()
+            self.session.data.used = used     # names read / written
             try:
                 figures = function(self.session, self.params)
             except dts_steps.StepError as error:
@@ -101,7 +103,12 @@ class Worker(QThread):
             except Exception:                           # noqa: BLE001
                 self.step_failed.emit(self.key, traceback.format_exc())
                 return
+            finally:
+                self.session.data.used = None
             owner = dts_steps.FIGURE_OWNER.get(self.key, self.key)
+            self.session.variables_used[owner] = (
+                sorted(n for n in used if n in self.session.data),
+                self.key)
             for name in set(self.session.data) - before:   # new variables
                 self.session.origin.setdefault(name, self.key)
             self.session.figures[owner] = figures
@@ -551,6 +558,26 @@ class MainWindow(QMainWindow):
         position = keys.index(key)
         self.previous_button.setEnabled(position > 0)
         self.next_button.setEnabled(position < len(keys) - 1)
+
+    # session variables never saved with a figure (internal caches)
+    def figure_variables(self, owner):
+        """Variables used to produce the figures of ``owner``: every
+        session variable read or written by its last run, with the inputs
+        of that run (``step_inputs``) and the physical parameters
+        (``physical_parameters``).  None when the run was not recorded."""
+        record = self.session.variables_used.get(owner)
+        if not record:
+            return None
+        names, key = record
+        data = self.session.data
+        out = {name: dict.__getitem__(data, name) for name in names
+               if name in data and "CACHE" not in name.upper()}
+        inputs = self.session.params_used.get(key)
+        if inputs:
+            out["step_inputs"] = {k: v for k, v in inputs.items()
+                              if not k.startswith("_")}
+        out["physical_parameters"] = dict(dts_steps.core.PHYSICS)
+        return out
 
     def update_step(self, step):
         """Update plot: the figures of ``step`` (of every step of its panel

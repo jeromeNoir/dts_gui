@@ -29,11 +29,47 @@ import gui_figures as figs
 # ---------------------------------------------------------------------------
 # session and small helpers
 # ---------------------------------------------------------------------------
+class TrackedData(dict):
+    """The session variables; while a step runs, the names it reads or
+    writes are recorded in ``used`` (Save data of a figure saves them)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.used = None                 # set while a step runs
+
+    def _use(self, name):
+        if self.used is not None:
+            self.used.add(name)
+
+    def __getitem__(self, name):
+        self._use(name)
+        return super().__getitem__(name)
+
+    def get(self, name, default=None):
+        if name in self:
+            self._use(name)
+        return super().get(name, default)
+
+    def __setitem__(self, name, value):
+        self._use(name)
+        super().__setitem__(name, value)
+
+    def setdefault(self, name, default=None):
+        self._use(name)
+        return super().setdefault(name, default)
+
+    def update(self, *args, **kwargs):
+        for name in dict(*args, **kwargs):
+            self._use(name)
+        super().update(*args, **kwargs)
+
+
 class Session:
     """Results shared between the steps."""
 
     def __init__(self):
-        self.data = {}
+        self.data = TrackedData()
+        self.variables_used = {}     # figure owner -> variables of its run
         self.figures = {}            # step id -> [(title, Figure)]
         self.three_layer_cache = {}  # (record, parameters) -> fit
         self.params_used = {}        # step id -> inputs of its last run
@@ -1509,6 +1545,11 @@ def ana_2(session, p):
     for name, time, depth, T in _records(session, p):
         iso_depth, uncertainty = core.isotherm_depth(depth, T, p["T_ISO"])
         curves.append((name, time, iso_depth, uncertainty))
+    session.data["A_ISOTHERM"] = {
+        "T_iso_degC": p["T_ISO"],
+        **{name: {"time": time, "depth_m": iso_depth,
+                  "uncertainty_m": uncertainty}
+           for name, time, iso_depth, uncertainty in curves}}
     return [("Isotherm depth", figs.isotherm_depth(curves, p["T_ISO"]))]
 
 
@@ -1581,6 +1622,13 @@ def ana_3_1(session, p):
         raise StepError(f"colour limits must satisfy 0 < lower < upper "
                         f"(got {vmin:g}, {vmax:g})")
     print(f"colour limits: {vmin:.3g} - {vmax:.3g} K ({limits})")
+    S["A_FFT_DEPTH"] = {
+        name: {"frequency_Hz": frequency, "depth_m": depth,
+               "amplitude_K": amplitude,
+               **({"N_overlay_Hz": overlay[0],
+                   "N_overlay_depth_m": overlay[1]} if overlay else {})}
+        for name, frequency, depth, amplitude, overlay in panels}
+    S["A_FFT_DEPTH_COLOUR_LIMITS"] = (float(vmin), float(vmax))
     return [("Frequency × depth",
              figs.fft_depth_maps(panels, vmin, vmax, f_coriolis,
                                  S["A_MAX_DEPTH"], shading(p),
@@ -1676,6 +1724,9 @@ def ana_3_2(session, p):
         dominant = int(np.nanargmax(amplitude))
         print(f"{name}: dominant period {1 / frequency[dominant] / 3600:.1f} h"
               f" (amplitude {amplitude[dominant]:.2f} m)")
+    S["A_ISO_PICK_DEPTH"] = {
+        c[0]: {"time": c[1], "depth_m": c[2], "uncertainty_m": c[3]}
+        for c in curves if len(c) >= 4}
     S.update(A_ISO_FFT=spectra, A_T_PICK=p["T_PICK"], A_N_ISO=N_band,
              A_POINCARE=poincare)
     marks = dict(f_coriolis=f_coriolis, poincare=poincare, N_band=N_band,
@@ -1719,6 +1770,10 @@ def ana_4_1_1(session, p):
     vmin, vmax = np.percentile(values, [20, 99.9])
     if p["USE_RESOLUTION"] and S["A_RESOLUTION"]:
         vmin = 0.5 * min(S["A_RESOLUTION"].values())
+    S["A_KZ_SPECTRA"] = {
+        name: {"time": time, "wavenumber_per_m": wavenumber,
+               "amplitude_K": amplitude}
+        for name, time, wavenumber, amplitude in panels}
     figures = [("Time × k_z", figs.vertical_fft_maps(
         panels, profile_times, vmin, vmax, p["VERTICAL_AXIS"], shading(p)))]
     k_range = (p.get("K_MIN"), p.get("K_MAX"))
@@ -1820,6 +1875,12 @@ def ana_4_1_2(session, p):
             results[channel] = rows
     if not results:
         raise StepError("no layer could be transformed")
+    S["A_FFT2"] = {
+        channel: {title: {"frequency_Hz": frequency,
+                          "k_z_unsigned_per_m": k_z,
+                          "amplitude_K": amplitude}
+                  for title, frequency, k_z, amplitude in rows}
+        for channel, rows in results.items()}
     values = np.concatenate([a[a > 0].ravel() for rows in results.values()
                              for *_, a in rows])
     vmin, vmax = np.percentile(values, [20, 99.9])
@@ -2187,6 +2248,12 @@ def ana_4_2_5(session, p):
                       f"{layer_name} = [{shown_top:.1f}, {shown_bottom:.1f}]"
                       f" m, {stairs['step_T'].size} step(s)")
             results[label].append((name, time[index], stairs))
+    S["A_STAIRCASES"] = {
+        label: {"layer": layer_name, "depth_range_m": tuple(extent[label]),
+                **{name: ({"time": when_used, **stairs}
+                          if stairs is not None else {"time": when_used})
+                   for name, when_used, stairs in results[label]}}
+        for label, _ in profiles}
     TIME = {name: time for name, time, _, _ in records}
     Z = {name: depth for name, _, depth, _ in records}
     T = {name: np.asarray(matrix, float) for name, _, _, matrix in records}
@@ -2220,6 +2287,10 @@ def ana_4_2_6(session, p):
               f"before dT/dz")
     if not maps:
         raise StepError("tick at least one channel")
+    S["A_GRADIENT"] = {
+        channel: {"time": time, "depth_m": grid, "dTdz_K_per_m": gradient}
+        for channel, time, grid, gradient in maps}
+    S["A_GRADIENT_PROFILES"] = profiles
     figures = [("Maps", figs.gradient_maps(
         maps, profiles, "Vertical temperature gradient dT/dz",
         shading(p)))]
@@ -2257,6 +2328,7 @@ def ana_4_2_9(session, p):
     if not records:
         raise StepError("tick at least one channel")
     figures = []
+    seismogram = {}
     step_min = p.get("WATERFALL_STEP_MIN")
     for channel, time, depth, T in records:
         indices = np.nonzero((time >= start) & (time <= end))[0]
@@ -2273,6 +2345,10 @@ def ana_4_2_9(session, p):
         if indices.size == 0:
             continue
         layers = three_layers(session, channel)
+        seismogram[channel] = {
+            "time": time[indices], "depth_m": depth,
+            "T_degC": np.asarray(T, float)[:, indices],
+            "spacing_K": p["WATERFALL_SPACING"]}
         figures.append((f"Seismogram-like profiles – {channel}",
                         figs.waterfall(
                             time, depth, np.asarray(T, float), layers,
@@ -2280,6 +2356,7 @@ def ana_4_2_9(session, p):
                             f"S2 temperature profiles, {span} ({channel})")))
     if not figures:
         raise StepError("no profile in the time window: change it")
+    session.data["A_SEISMOGRAM"] = seismogram
     return figures
 
 

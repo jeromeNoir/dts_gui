@@ -127,6 +127,17 @@ DESCRIPTIONS = {
                   "parameters)",
     "A_POINCARE": "Estimated V1 Poincaré frequency band (Hz)",
     "A_ISO_FFT": "Spectrum of the isotherm depth (frequency, amplitude)",
+    "A_ISOTHERM": "Isotherm depth vs time per record (Following an isotherm)",
+    "A_ISO_PICK_DEPTH": "Depth of the isotherm analysed in 3.2 vs time",
+    "A_FFT_DEPTH": "FFT over time at each depth: frequency, depth, amplitude",
+    "A_FFT_DEPTH_COLOUR_LIMITS": "Colour limits of the frequency × depth maps (K)",
+    "A_KZ_SPECTRA": "Vertical FFT of every profile: time, k_z, amplitude",
+    "A_FFT2": "2D FFT per channel and layer: frequency, |k_z|, amplitude",
+    "A_GRADIENT": "Vertical temperature gradient dT/dz maps per channel",
+    "A_GRADIENT_PROFILES": "Instants of the gradient profiles",
+    "A_STAIRCASES": "Staircases detected at each individual profile",
+    "A_SEISMOGRAM": "Profiles of the seismogram-like plot per channel",
+    "A_CONFIGURATION_TABLE": "Configuration of the preprocessed data loaded",
     "A_STAIRCASE_TIMES": "Individual profiles of the last staircase "
                          "detection (label, UTC time)",
 }

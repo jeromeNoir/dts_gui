@@ -1701,15 +1701,20 @@ class FigurePanel(QWidget):
         return None
 
     def save_figure_data(self, owner, title, path=None, chosen_filter=""):
-        """Save the data drawn on one figure: the user chooses the file
-        name, the folder and the format (npz, NetCDF, HDF5, txt, csv,
-        MATLAB).  Returns the files written."""
+        """Save the variables used to produce one figure (the session
+        variables read or written by the step that drew it, its inputs
+        and the physical parameters): the user chooses the file name, the
+        folder and the format (npz, NetCDF, HDF5, txt, csv, MATLAB).
+        Returns the files written."""
         import gui_export
         figure = self.figure_object(owner, title)
         if figure is None:
             QMessageBox.warning(self, "Save data",
                                 f"'{title}' is not computed yet.")
             return []
+        window = self.window()
+        variables = (window.figure_variables(owner)
+                     if hasattr(window, "figure_variables") else None)
         if path is None:
             default = os.path.join(FigurePanel.last_save_folder or
                                    os.path.expanduser("~"),
@@ -1720,18 +1725,24 @@ class FigurePanel(QWidget):
             if not path:
                 return []
         fmt = gui_export.format_of(path, chosen_filter)
+        if variables:
+            tree = gui_export.to_tree(variables)
+            what = "variables of the figure"
+        else:                       # no record of the run: drawn data
+            tree = gui_export.figure_data(figure)
+            what = "data drawn on the figure"
         try:
-            files = gui_export.write(path, fmt,
-                                     gui_export.figure_data(figure),
-                                     title=title)
+            files = gui_export.write(path, fmt, tree, title=title)
         except Exception as error:                 # noqa: BLE001
             QMessageBox.warning(self, "Save data",
                                 f"Could not save the data:\n{error}")
             return []
         FigurePanel.last_save_folder = os.path.dirname(files[0])
-        text = (f"data of the figure '{title}' saved ({fmt}): "
+        names = [n for n in (variables or {})
+                 if n not in ("step_inputs", "physical_parameters")]
+        text = (f"{what} '{title}' saved ({fmt}"
+                + (f"; {', '.join(names)}" if names else "") + "): "
                 + ", ".join(files) + "\n")
-        window = self.window()
         (window.write_log if hasattr(window, "write_log") else print)(text)
         return files
 

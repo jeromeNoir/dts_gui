@@ -53,10 +53,11 @@ all the figures below it (partly ticked when only some are). A right click
 on a figure name opens <i>Show</i> / <i>Hide</i> (tick or untick it) and
 <i>Focus</i> (show it and bring its tab forward; only for a figure already
 computed; on an individual profile P1, P2, …: Show / Hide that profile, and
-Focus / Save data of its figure; on a header: Show all / Hide all) and <i>Save data…</i> (the data drawn on the figure — curves,
-maps with their x and y, shaded areas, points, labels, axis titles, one
-group per panel — written to a file whose name, folder and format are
-asked: npz, NetCDF, HDF5, txt, csv or MATLAB; times in UTC: datetime64 in
+Focus / Save data of its figure; on a header: Show all / Hide all) and <i>Save data…</i> (the variables used to produce the figure — every
+session variable read or written by the last run of the step that drew it,
+with the inputs of that run in <code>step_inputs</code> and the physical
+parameters in <code>physical_parameters</code>; internal caches are left
+out — written to a file whose name, folder and format are asked: npz, NetCDF, HDF5, txt, csv or MATLAB; times in UTC: datetime64 in
 npz, milliseconds since 1970 in NetCDF/HDF5, ISO text in txt/csv/MATLAB;
 txt and csv write one table per curve or map plus an index file). Green circle: ready; red circle: not computed yet. Every figure has the matplotlib tool bar
 (zoom, pan, save).</li>
