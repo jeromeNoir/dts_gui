@@ -531,7 +531,8 @@ def isotherm_depth(curves, T_iso, window=(None, None)):
 
 
 def fft_depth_maps(rows, vmin, vmax, f_coriolis, max_depth, shading,
-                   x_axis="frequency", x_scale="log"):
+                   x_axis="frequency", x_scale="log",
+                   value_label="FFT amplitude (K)", title=None):
     """x_axis 'frequency' (Hz) or 'period' (hours); x_scale 'log' or
     'linear'."""
     def x_of(f):
@@ -563,12 +564,13 @@ def fft_depth_maps(rows, vmin, vmax, f_coriolis, max_depth, shading,
         ax.set_title(name, fontsize=10)
     axes[-1].set_xlabel("frequency (Hz)" if x_axis == "frequency"
                         else "period (hours)")
-    fig.colorbar(mesh, ax=list(axes), label="FFT amplitude (K)", shrink=0.9)
-    fig.suptitle("Amplitude of the FFT over time at each depth")
+    fig.colorbar(mesh, ax=list(axes), label=value_label, shrink=0.9)
+    fig.suptitle(title or "Amplitude of the FFT over time at each depth")
     return fig
 
 
-def isotherm_spectrum(spectra, T_pick, marks, axis, x_scale="log"):
+def isotherm_spectrum(spectra, T_pick, marks, axis, x_scale="log",
+                      value_label="FFT amplitude (m)"):
     fig = new_figure(10, 4.2)
     ax = fig.subplots()
 
@@ -590,8 +592,9 @@ def isotherm_spectrum(spectra, T_pick, marks, axis, x_scale="log"):
         low, high = sorted(x_of(np.array(marks["N_band"])))
         ax.axvspan(low, high, color="0.85", zorder=0,
                    label="N at the isotherm")
-    ax.axhline(marks["dz"], color="0.3", ls=":", lw=1.2,
-               label="DTS vertical resolution")
+    if marks.get("dz"):                  # amplitude only
+        ax.axhline(marks["dz"], color="0.3", ls=":", lw=1.2,
+                   label="DTS vertical resolution")
     if marks.get("floor"):
         ax.set_ylim(bottom=marks["floor"])
     if axis == "frequency":
@@ -599,15 +602,16 @@ def isotherm_spectrum(spectra, T_pick, marks, axis, x_scale="log"):
         period_axis(ax)
     else:
         ax.set_xlabel("period (hours)")
-    ax.set_ylabel("FFT amplitude (m)")
+    ax.set_ylabel(value_label)
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3, which="both")
-    fig.suptitle(f"FFT of the {T_pick:g} °C isotherm depth"
+    fig.suptitle(f"Spectrum of the {T_pick:g} °C isotherm depth"
                  + ("" if axis == "frequency" else " vs period"))
     return fig
 
 
-def vertical_fft_maps(rows, instants, vmin, vmax, vertical_axis, shading):
+def vertical_fft_maps(rows, instants, vmin, vmax, vertical_axis, shading,
+                      value_label="FFT amplitude (K)", title=None):
     """Maps time × k_z (or wavelength) of every record, the individual
     profiles marked by dotted lines."""
     label = ("wavenumber (1/m)" if vertical_axis == "wavenumber"
@@ -634,13 +638,14 @@ def vertical_fft_maps(rows, instants, vmin, vmax, vertical_axis, shading):
                             ha="left", va="top", fontsize=8)
     axes[-1].set_xlabel("time (UTC)")
     format_time_axis(axes[-1])
-    fig.colorbar(mesh, ax=list(axes), label="FFT amplitude (K)", shrink=0.9)
-    fig.suptitle("Amplitude of the vertical FFT of each profile")
+    fig.colorbar(mesh, ax=list(axes), label=value_label, shrink=0.9)
+    fig.suptitle(title or "Amplitude of the vertical FFT of each profile")
     return fig
 
 
 def vertical_fft_profiles(rows, instants, vertical_axis, k_range=(None,
-                          None), fits=None):
+                          None), fits=None, value_label="FFT amplitude (K)",
+                          quantity="T"):
     """Vertical FFT of the individual profiles: one panel per record (three
     columns at most), one curve per profile; the wavenumber range chosen is
     shaded, and the scaling laws a k^b fitted in it are drawn dashed."""
@@ -687,13 +692,14 @@ def vertical_fft_profiles(rows, instants, vertical_axis, k_range=(None,
     for ax in axes[:n]:
         ax.set_xlabel(label)
     for ax in axes[::columns]:
-        ax.set_ylabel("FFT amplitude (K)")
-    fig.suptitle("Vertical FFT of the individual profiles")
+        ax.set_ylabel(value_label)
+    fig.suptitle(f"Vertical spectrum of the individual profiles – "
+                 f"{quantity}")
     return fig
 
 
 def fft2_maps(rows, vmin, vmax, title, vertical_axis, time_axis, shading,
-              columns=3):
+              columns=3, value_label="FFT amplitude (K)"):
     """2D FFT maps (frequency or period × k_z or wavelength), one panel per
     row (records or layers; ``columns`` at most), common colour scale."""
     n = len(rows)
@@ -720,7 +726,7 @@ def fft2_maps(rows, vmin, vmax, title, vertical_axis, time_axis, shading,
     for ax in axes[::columns]:
         ax.set_ylabel("$k_z$ (1/m)" if vertical_axis == "wavenumber"
                       else "wavelength (m)")
-    fig.colorbar(mesh, ax=list(axes[:n]), label="FFT amplitude (K)",
+    fig.colorbar(mesh, ax=list(axes[:n]), label=value_label,
                  shrink=0.9)
     fig.suptitle(title)
     return fig

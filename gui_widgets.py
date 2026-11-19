@@ -787,7 +787,10 @@ class ProfileTimeField(QComboBox):
 
 
 class TimeTable(QWidget):
-    """Editable table: (label, time) or (start, end) rows."""
+    """Editable table: (label, time) or (start, end) rows.  The first cell
+    of every row has a tick box: an unticked row is kept in the table (and
+    in the settings) but left out of the analysis — ``value()`` returns the
+    ticked rows only, ``rows()`` every row with its state."""
 
     changed = Signal()
 
@@ -831,20 +834,53 @@ class TimeTable(QWidget):
         self.changed.emit()
 
     def _append(self, row):
+        columns = self.table.columnCount()
+        row = list(row)
+        active = True
+        if len(row) > columns:                 # (texts..., active)
+            active = bool(row[columns])
+            row = row[:columns]
+        row += [""] * (columns - len(row))
         index = self.table.rowCount()
         self.table.insertRow(index)
         for column, text in enumerate(row):
-            self.table.setItem(index, column, QTableWidgetItem(str(text)))
+            item = QTableWidgetItem(str(text))
+            if column == 0:
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked if active else Qt.Unchecked)
+                item.setToolTip("Ticked: used in the analysis; unticked: "
+                                "kept in the table but left out")
+            self.table.setItem(index, column, item)
 
-    def value(self):
+    @staticmethod
+    def active_rows(rows):
+        """The rows ticked, without their state (for the steps)."""
+        out = []
+        for row in rows or []:
+            row = tuple(row)
+            if row and isinstance(row[-1], bool):
+                if row[-1]:
+                    out.append(row[:-1])
+            else:
+                out.append(row)
+        return out
+
+    def rows(self):
+        """Every row, ticked or not: (texts..., active)."""
         rows = []
         for index in range(self.table.rowCount()):
             row = tuple((self.table.item(index, c).text().strip()
                          if self.table.item(index, c) else "")
                         for c in range(self.table.columnCount()))
+            first = self.table.item(index, 0)
+            active = first is None or first.checkState() == Qt.Checked
             if any(row):
-                rows.append(row)
+                rows.append(row + (active,))
         return rows
+
+    def value(self):
+        """The rows ticked (used by the analysis)."""
+        return self.active_rows(self.rows())
 
     def set_value(self, rows):
         self.table.blockSignals(True)
@@ -1399,6 +1435,13 @@ class ParameterPanel(QWidget):
         return {name: widget.value() for name, widget in self.fields.items()
                 if base is None
                 or base in self.specs[name].get("only_for", [base])}
+
+    def state(self):
+        """Inputs for a settings file: the tables keep their unticked
+        rows (with their state)."""
+        return {name: (widget.rows() if isinstance(widget, TimeTable)
+                       else widget.value())
+                for name, widget in self.fields.items()}
 
     def set_values(self, values):
         for name, value in values.items():

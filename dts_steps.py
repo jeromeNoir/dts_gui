@@ -1553,16 +1553,47 @@ def ana_2(session, p):
     return [("Isotherm depth", figs.isotherm_depth(curves, p["T_ISO"]))]
 
 
-def fft_depth_time(time, T_matrix):
-    """Frequencies (Hz) and amplitude 2|X|/n of each row over time (row
-    mean removed, NaN -> 0, zero frequency dropped)."""
-    dt = np.median(np.diff(time)) / np.timedelta64(1, "s")
-    anomaly = np.asarray(T_matrix, float)
-    anomaly = np.nan_to_num(anomaly - np.nan_to_num(
-        nan_mean_rows(anomaly))[:, None], nan=0.0)
-    amplitude = 2.0 * np.abs(np.fft.rfft(anomaly, axis=1)) / anomaly.shape[1]
-    frequency = np.fft.rfftfreq(anomaly.shape[1], d=dt)
-    return frequency[1:], amplitude[:, 1:]
+def fft_depth_time(time, T_matrix, detrend="constant", window="none",
+                   kind="FFT amplitude"):
+    """Frequencies (Hz) and spectrum of each row over time (detrended,
+    tapered, NaN -> 0, zero frequency dropped): FFT amplitude 2|X|/Σw or
+    power spectral density (dts_core.spectrum_along)."""
+    dt = float(np.median(np.diff(time)) / np.timedelta64(1, "s"))
+    return core.spectrum_along(np.asarray(T_matrix, float), dt, 1,
+                               detrend, window, kind)
+
+
+def spectrum_options(p, prefix=""):
+    """Detrending, window and spectrum kind of an FFT step."""
+    return dict(detrend=p.get(prefix + "DETREND") or "constant",
+                window=p.get(prefix + "WINDOW") or "none",
+                kind=p.get(prefix + "SPECTRUM_KIND") or "FFT amplitude")
+
+
+def spectrum_quantity(p, prefix=""):
+    return p.get(prefix + "SPECTRUM_QUANTITY") or "T"
+
+
+def as_quantity(quantity, depth, T):
+    """T itself, or its vertical gradient dT/dz (K/m)."""
+    if quantity == "dT/dz":
+        return core.vertical_gradient(depth, np.asarray(T, float))[1]
+    return T
+
+
+def spectrum_label(kind, unit, per):
+    """Colour-bar / axis label of a spectrum: unit of the quantity (K,
+    K/m, m) and of the frequency axis (Hz, cpm, Hz·cpm)."""
+    if kind == "FFT amplitude":
+        return f"FFT amplitude ({unit})"
+    squared = f"({unit})²" if "/" in unit else f"{unit}²"
+    return f"PSD ({squared}/{per})"
+
+
+def describe_spectrum(options, quantity=None):
+    text = (f"{options['kind']}, detrend {options['detrend']}, window "
+            f"{options['window']}")
+    return (f"{quantity}: " if quantity else "") + text
 
 
 def coriolis_Hz(latitude_deg=None):
@@ -1589,9 +1620,14 @@ def ana_3_1(session, p):
               if p.get("PERIOD_MAX_PLOT") else np.finfo(float).tiny)
     f_colour = (1.0 / (p["PERIOD_MAX_COLOUR"] * 3600.0)
                 if p.get("PERIOD_MAX_COLOUR") else np.finfo(float).tiny)
+    options = spectrum_options(p)
+    quantity = spectrum_quantity(p)
+    unit = "K/m" if quantity == "dT/dz" else "K"
+    print("spectrum: " + describe_spectrum(options, quantity))
     panels = []
     for name, time, depth, T in _records(session, p):
-        frequency, amplitude = fft_depth_time(time, T)
+        frequency, amplitude = fft_depth_time(
+            time, as_quantity(quantity, depth, T), **options)
         keep = frequency >= f_plot
         overlay = None
         if name in N_mean:
@@ -1610,7 +1646,11 @@ def ana_3_1(session, p):
     limits = p.get("COLOUR_LIMITS", "None")
     if p.get("USE_RESOLUTION"):            # older settings files
         limits = "Instrument resolution"
-    if limits == "Instrument resolution":
+    if limits == "Instrument resolution" and (
+            options["kind"] != "FFT amplitude" or quantity != "T"):
+        print("instrument resolution: only for the FFT amplitude of T - "
+              "automatic limits")
+    elif limits == "Instrument resolution":
         if S["A_RESOLUTION"]:
             vmin = 0.5 * min(S["A_RESOLUTION"].values())
         else:
@@ -1621,19 +1661,25 @@ def ana_3_1(session, p):
     if not 0 < vmin < vmax:
         raise StepError(f"colour limits must satisfy 0 < lower < upper "
                         f"(got {vmin:g}, {vmax:g})")
-    print(f"colour limits: {vmin:.3g} - {vmax:.3g} K ({limits})")
+    print(f"colour limits: {vmin:.3g} - {vmax:.3g} ({limits})")
     S["A_FFT_DEPTH"] = {
-        name: {"frequency_Hz": frequency, "depth_m": depth,
-               "amplitude_K": amplitude,
-               **({"N_overlay_Hz": overlay[0],
-                   "N_overlay_depth_m": overlay[1]} if overlay else {})}
-        for name, frequency, depth, amplitude, overlay in panels}
+        "spectrum_kind": options["kind"], "quantity": quantity,
+        "detrend": options["detrend"], "window": options["window"],
+        **{name: {"frequency_Hz": frequency, "depth_m": depth,
+                  "spectrum": amplitude,
+                  **({"N_overlay_Hz": overlay[0],
+                      "N_overlay_depth_m": overlay[1]} if overlay else {})}
+           for name, frequency, depth, amplitude, overlay in panels}}
     S["A_FFT_DEPTH_COLOUR_LIMITS"] = (float(vmin), float(vmax))
     return [("Frequency × depth",
              figs.fft_depth_maps(panels, vmin, vmax, f_coriolis,
                                  S["A_MAX_DEPTH"], shading(p),
                                  p.get("X_AXIS", "frequency"),
-                                 p.get("X_SCALE", "log")))]
+                                 p.get("X_SCALE", "log"),
+                                 value_label=spectrum_label(
+                                     options["kind"], unit, "Hz"),
+                                 title=f"{options['kind']} over time at "
+                                       f"each depth – {quantity}"))]
 
 
 def ana_3_2(session, p):
@@ -1651,13 +1697,15 @@ def ana_3_2(session, p):
             keep &= time <= b
         return keep
 
+    options = spectrum_options(p, "ISO_")
+    print("spectrum of the isotherm depth: " + describe_spectrum(options))
     curves, spectra, N_values = [], {}, []
     for name, time, depth, T in _records(session, p):
         iso_depth, uncertainty = core.isotherm_depth(depth, T, p["T_PICK"])
         curves.append((name, time, iso_depth, uncertainty))
         keep = window_of(time, start, end)
-        frequency, amplitude = fft_depth_time(time[keep],
-                                              iso_depth[keep][None, :])
+        frequency, amplitude = fft_depth_time(
+            time[keep], iso_depth[keep][None, :], **options)
         spectra[name] = (frequency, amplitude[0])
         if name in N_mean:
             in_window = iso_depth[keep]
@@ -1710,7 +1758,9 @@ def ana_3_2(session, p):
         print("Poincare V1 band: no usable profile in the window")
 
     floor = None
-    if p["USE_RESOLUTION"]:
+    if p["USE_RESOLUTION"] and options["kind"] != "FFT amplitude":
+        print("instrument resolution: only for the FFT amplitude")
+    elif p["USE_RESOLUTION"]:
         floors = []
         for name, time, depth, Tm in _records(session, p, with_chain=False):
             iso = [c for c in curves if c[0] == name][0][2]
@@ -1723,20 +1773,25 @@ def ana_3_2(session, p):
     for name, (frequency, amplitude) in spectra.items():
         dominant = int(np.nanargmax(amplitude))
         print(f"{name}: dominant period {1 / frequency[dominant] / 3600:.1f} h"
-              f" (amplitude {amplitude[dominant]:.2f} m)")
+              f" ({spectrum_label(options['kind'], 'm', 'Hz')} "
+              f"{amplitude[dominant]:.3g})")
     S["A_ISO_PICK_DEPTH"] = {
         c[0]: {"time": c[1], "depth_m": c[2], "uncertainty_m": c[3]}
         for c in curves if len(c) >= 4}
     S.update(A_ISO_FFT=spectra, A_T_PICK=p["T_PICK"], A_N_ISO=N_band,
              A_POINCARE=poincare)
     marks = dict(f_coriolis=f_coriolis, poincare=poincare, N_band=N_band,
-                 dz=S["A_DZ"], floor=floor)
+                 dz=(S["A_DZ"] if options["kind"] == "FFT amplitude"
+                     else None), floor=floor)
+    S["A_ISO_FFT_OPTIONS"] = options
     return [("Depth vs time", figs.isotherm_depth(curves, p["T_PICK"],
                                                   window=(start, end))),
             ("Spectrum",
              figs.isotherm_spectrum(spectra, p["T_PICK"], marks,
                                     p.get("SPECTRUM_AXIS", "frequency"),
-                                    p.get("SPECTRUM_SCALE", "log")))]
+                                    p.get("SPECTRUM_SCALE", "log"),
+                                    value_label=spectrum_label(
+                                        options["kind"], "m", "Hz")))]
 
 
 def ana_4_1_1(session, p):
@@ -1749,6 +1804,10 @@ def ana_4_1_1(session, p):
         if p.get("WAVELENGTH_MAX_PLOT") else 0.0
     k_colour = 1.0 / p["WAVELENGTH_MAX_COLOUR"] \
         if p.get("WAVELENGTH_MAX_COLOUR") else 0.0
+    options = spectrum_options(p)
+    quantity = spectrum_quantity(p)
+    unit = "K/m" if quantity == "dT/dz" else "K"
+    print("spectrum: " + describe_spectrum(options, quantity))
     panels = []
     for name, time, depth, T in _records(session, p):
         if name == "LeXPLORE chain":
@@ -1757,7 +1816,8 @@ def ana_4_1_1(session, p):
             T = np.vstack([np.interp(uniform, depth, T[:, i])
                            for i in range(time.size)]).T
             depth = uniform
-        wavenumber, amplitude = core.fft_vertical(depth, T)
+        wavenumber, amplitude = core.fft_vertical(
+            depth, as_quantity(quantity, depth, T), **options)
         keep = (wavenumber >= k_plot) & (wavenumber > 0)
         if not keep.any():
             print(f"NOTE: {name} resolves no wavenumber above "
@@ -1769,13 +1829,21 @@ def ana_4_1_1(session, p):
     values = values[values > 0]
     vmin, vmax = np.percentile(values, [20, 99.9])
     if p["USE_RESOLUTION"] and S["A_RESOLUTION"]:
-        vmin = 0.5 * min(S["A_RESOLUTION"].values())
+        if options["kind"] == "FFT amplitude" and quantity == "T":
+            vmin = 0.5 * min(S["A_RESOLUTION"].values())
+        else:
+            print("instrument resolution: only for the FFT amplitude of T")
+    value_label = spectrum_label(options["kind"], unit, "cpm")
     S["A_KZ_SPECTRA"] = {
-        name: {"time": time, "wavenumber_per_m": wavenumber,
-               "amplitude_K": amplitude}
-        for name, time, wavenumber, amplitude in panels}
+        "spectrum_kind": options["kind"], "quantity": quantity,
+        "detrend": options["detrend"], "window": options["window"],
+        **{name: {"time": time, "wavenumber_per_m": wavenumber,
+                  "spectrum": amplitude}
+           for name, time, wavenumber, amplitude in panels}}
     figures = [("Time × k_z", figs.vertical_fft_maps(
-        panels, profile_times, vmin, vmax, p["VERTICAL_AXIS"], shading(p)))]
+        panels, profile_times, vmin, vmax, p["VERTICAL_AXIS"], shading(p),
+        value_label=value_label,
+        title=f"Vertical {options['kind']} of each profile – {quantity}"))]
     k_range = (p.get("K_MIN"), p.get("K_MAX"))
     fits = None
     if p.get("_FIT_SCALING"):
@@ -1787,7 +1855,9 @@ def ana_4_1_1(session, p):
         figures.append(("FFT of the individual profiles",
                          figs.vertical_fft_profiles(panels, profile_times,
                                                     p["VERTICAL_AXIS"],
-                                                    k_range, fits)))
+                                                    k_range, fits,
+                                                    value_label=value_label,
+                                                    quantity=quantity)))
     return figures
 
 
@@ -1855,6 +1925,10 @@ def ana_4_1_2(session, p):
             cropped[layer] = layered_data(S, name, window)
         except StepError as error:
             print(f"{name}: skipped ({error})")
+    options = spectrum_options(p)
+    quantity = spectrum_quantity(p)
+    unit = "K/m" if quantity == "dT/dz" else "K"
+    print("spectrum: " + describe_spectrum(options, quantity))
     results = {}                            # channel -> [(layer, f, k, a)]
     for channel, time, depth, T in records:
         rows = []
@@ -1868,7 +1942,8 @@ def ana_4_1_2(session, p):
             else:
                 continue
             frequency, k_z, amplitude = core.fft2_matrix(
-                time, z, matrix, label=f"{channel} {title}")
+                time, z, as_quantity(quantity, z, matrix),
+                label=f"{channel} {title}", **options)
             k_unsigned, a_unsigned = _unsigned_kz(k_z, amplitude)
             rows.append((title, frequency, k_unsigned, a_unsigned))
         if rows:
@@ -1876,22 +1951,31 @@ def ana_4_1_2(session, p):
     if not results:
         raise StepError("no layer could be transformed")
     S["A_FFT2"] = {
-        channel: {title: {"frequency_Hz": frequency,
+        "spectrum_kind": options["kind"], "quantity": quantity,
+        "detrend": options["detrend"], "window": options["window"],
+        **{channel: {title: {"frequency_Hz": frequency,
                           "k_z_unsigned_per_m": k_z,
-                          "amplitude_K": amplitude}
+                          "spectrum": amplitude}
                   for title, frequency, k_z, amplitude in rows}
-        for channel, rows in results.items()}
+           for channel, rows in results.items()}}
     values = np.concatenate([a[a > 0].ravel() for rows in results.values()
                              for *_, a in rows])
     vmin, vmax = np.percentile(values, [20, 99.9])
-    if p["USE_RESOLUTION"]:
+    if p["USE_RESOLUTION"] and (options["kind"] != "FFT amplitude"
+                                or quantity != "T"):
+        print("instrument resolution: only for the FFT amplitude of T")
+    elif p["USE_RESOLUTION"]:
         resolutions = [S["A_RESOLUTION"][n] for n in results
                        if n in S.get("A_RESOLUTION", {})]
         if resolutions:
             vmin = 0.5 * min(resolutions)
     return [(f"2D FFT – {channel}", figs.fft2_maps(
-                rows, vmin, vmax, f"2D FFT (depth × time) – {channel}",
-                p["VERTICAL_AXIS"], p["TIME_AXIS"], shading(p), columns=2))
+                rows, vmin, vmax,
+                f"2D {options['kind']} (depth × time) of {quantity} – "
+                f"{channel}",
+                p["VERTICAL_AXIS"], p["TIME_AXIS"], shading(p), columns=2,
+                value_label=spectrum_label(options["kind"], unit,
+                                           "(Hz·cpm)")))
             for channel, rows in results.items()]
 
 
@@ -2745,7 +2829,9 @@ DISPLAY_ONLY = {"pre.1.replot", "pre.3.replot", "ana.0.instants",
 # steps that use the individual profiles of Load preprocessed data
 USE_PROFILE_TIMES = ("ana.4.1.1",)
 # figure brought forward after a run (instead of the first one)
-FOCUS_FIGURE = {"ana.3.2": "Spectrum"}
+FOCUS_FIGURE = {"ana.3.2": "Spectrum",
+                # Fit scaling: the spectra with the fitted laws
+                "ana.4.1.1.fit": "FFT of the individual profiles"}
 STEPS = {
     "pre.1.load": (pre_1_load, []),
     "pre.1.mirror": (pre_1_mirror, ["pre.1.load"]),

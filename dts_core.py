@@ -1541,7 +1541,82 @@ def isotherm_depth(z, T_matrix, T_iso):
     return crossing_depth, uncertainty
 
 
-def fft_vertical(z, T_matrix):
+# ---- spectral analysis: detrending, window, amplitude or power ------------
+DETRENDS = ("constant", "linear")
+WINDOWS = ("none", "Hann", "Hamming", "Blackman", "Tukey (25 %)")
+SPECTRUM_KINDS = ("FFT amplitude", "Power spectral density")
+
+
+def detrend_along(x, axis=0, kind="constant"):
+    """Remove from every series along ``axis`` its mean ('constant') or
+    its least-squares line ('linear'), NaN-aware (the fit uses the finite
+    samples); NaN are then set to 0."""
+    x = np.moveaxis(np.asarray(x, dtype=float), axis, 0)
+    finite = np.isfinite(x)
+    n = np.maximum(finite.sum(axis=0), 1)
+    y = np.where(finite, x, 0.0)
+    mean = y.sum(axis=0) / n
+    out = np.where(finite, x - mean, 0.0)
+    if kind == "linear":
+        index = np.arange(x.shape[0], dtype=float).reshape(
+            (-1,) + (1,) * (x.ndim - 1))
+        t = np.where(finite, index, 0.0)
+        t_mean = t.sum(axis=0) / n
+        dt = np.where(finite, index - t_mean, 0.0)
+        denominator = (dt ** 2).sum(axis=0)
+        slope = np.where(denominator > 0, (dt * out).sum(axis=0)
+                         / np.where(denominator > 0, denominator, 1.0), 0.0)
+        out = np.where(finite, out - slope * dt, 0.0)
+    elif kind != "constant":
+        raise ValueError(f"detrend must be one of {DETRENDS}, not {kind!r}")
+    return np.moveaxis(out, 0, axis)
+
+
+def window_weights(n, kind="none"):
+    """Taper of ``n`` samples: none (rectangular), Hann, Hamming, Blackman
+    or Tukey (25 % cosine tapers)."""
+    from scipy.signal import get_window
+    name = (kind or "none").lower()
+    if name == "none":
+        return np.ones(n)
+    if name.startswith("tukey"):
+        return get_window(("tukey", 0.25), n, fftbins=False)
+    if name in ("hann", "hamming", "blackman"):
+        return get_window(name, n, fftbins=False)
+    raise ValueError(f"window must be one of {WINDOWS}, not {kind!r}")
+
+
+def spectrum_along(x, step, axis=0, detrend="constant", window="none",
+                   kind="FFT amplitude"):
+    """One-sided spectrum of every series of ``x`` along ``axis`` (sample
+    spacing ``step``: seconds, metres, ...), after detrending and tapering.
+
+    'FFT amplitude': 2|X| / Σw, the amplitude of a sinusoid in the units of
+    x (the window's coherent gain is corrected).  'Power spectral density':
+    2|X|² / (fs Σw²), in units of x² per cycle per unit of ``step``
+    (Σ PSD Δf = variance of the tapered series).  Returns (frequencies
+    (cycles per unit of step, zero dropped), spectrum with the frequency
+    along ``axis``)."""
+    prepared = detrend_along(x, axis, detrend)
+    n = prepared.shape[axis]
+    w = window_weights(n, window)
+    shape = [1] * prepared.ndim
+    shape[axis] = n
+    X = np.fft.rfft(prepared * w.reshape(shape), axis=axis)
+    frequency = np.fft.rfftfreq(n, d=step)
+    if kind == "FFT amplitude":
+        values = 2.0 * np.abs(X) / w.sum()
+    elif kind == "Power spectral density":
+        values = 2.0 * np.abs(X) ** 2 / ((1.0 / step) * (w ** 2).sum())
+    else:
+        raise ValueError(f"kind must be one of {SPECTRUM_KINDS}, not "
+                         f"{kind!r}")
+    values = np.take(values, np.arange(1, frequency.size), axis=axis)
+    return frequency[1:], values
+
+
+def fft_vertical(z, T_matrix, detrend="constant", window="none",
+                 kind="FFT amplitude"):
     """FFT of each profile along depth: wavenumber spectra of a record.
 
     ``z``: depths of the rows of ``T_matrix`` (m, uniform grid);
@@ -1551,19 +1626,13 @@ def fft_vertical(z, T_matrix):
     metre and the amplitude 2|X|/n per profile, the zero wavenumber
     dropped (``amplitude[k, t]``)."""
     dz_grid = float(np.median(np.diff(z)))
-    anomaly = np.asarray(T_matrix, dtype=float)
-    n_finite = np.isfinite(anomaly).sum(axis=0, keepdims=True)
-    profile_mean = np.where(n_finite > 0,
-                            np.nansum(anomaly, axis=0, keepdims=True) /
-                            np.maximum(n_finite, 1), 0.0)
-    anomaly = np.nan_to_num(anomaly - profile_mean, nan=0.0)
-    amplitude = 2.0 * np.abs(np.fft.rfft(anomaly, axis=0)) / anomaly.shape[0]
-    wavenumber = np.fft.rfftfreq(anomaly.shape[0], d=dz_grid)
-    return wavenumber[1:], amplitude[1:, :]
+    return spectrum_along(np.asarray(T_matrix, dtype=float), dz_grid, 0,
+                          detrend, window, kind)
 
 
 def fft2_matrix(time, z, T_matrix, verbose=True, label="",
-                signed_frequency=False):
+                signed_frequency=False, detrend="linear", window="none",
+                kind="FFT amplitude"):
     """2D FFT (depth x time) of one temperature matrix T(z, time).
 
     ``time`` must have a uniform step and ``z`` a uniform spacing; depth
@@ -1595,15 +1664,25 @@ def fft2_matrix(time, z, T_matrix, verbose=True, label="",
         if verbose:
             print(f"{label}: only {nz} complete depth row(s), skipped")
         return None
-    x_detrend = np.arange(nt) - (nt - 1) / 2.0
-    T_clean = T_clean - T_clean.mean(axis=1, keepdims=True)
-    slope = (T_clean @ x_detrend) / (x_detrend @ x_detrend)
-    T_clean = T_clean - np.outer(slope, x_detrend)
+    # detrend over time at each depth (removes the mean profile), then
+    # along depth at each time; taper in both directions
+    T_clean = detrend_along(detrend_along(T_clean, 1, detrend), 0, detrend)
+    w_z, w_t = window_weights(nz, window), window_weights(nt, window)
+    T_clean = T_clean * np.outer(w_z, w_t)
+    if kind == "FFT amplitude":
+        scale = 2.0 / (w_z.sum() * w_t.sum())
+    elif kind == "Power spectral density":
+        scale = 2.0 * dt_seconds * dz / ((w_z ** 2).sum() * (w_t ** 2).sum())
+    else:
+        raise ValueError(f"kind must be one of {SPECTRUM_KINDS}")
+
+    def finish(F):
+        return scale * (np.abs(F) if kind == "FFT amplitude"
+                        else np.abs(F) ** 2)
     k_z = np.fft.fftshift(np.fft.fftfreq(nz, d=dz))
     if signed_frequency:
         spectrum = np.fft.fft2(T_clean)        # two-sided in f and k_z
-        amplitude = (2.0 * np.abs(np.fft.fftshift(spectrum, axes=(0, 1)))
-                     / (nz * nt))
+        amplitude = finish(np.fft.fftshift(spectrum, axes=(0, 1)))
         frequency = np.fft.fftshift(np.fft.fftfreq(nt, d=dt_seconds))
         if verbose:
             print(f"{label}: {nz} depths x {nt} times, "
@@ -1612,7 +1691,7 @@ def fft2_matrix(time, z, T_matrix, verbose=True, label="",
         return frequency, k_z, amplitude
     spectrum = np.fft.rfft(T_clean, axis=1)    # time  -> frequency (one-sided)
     spectrum = np.fft.fft(spectrum, axis=0)    # depth -> k_z (two-sided)
-    amplitude = 2.0 * np.abs(np.fft.fftshift(spectrum, axes=0)) / (nz * nt)
+    amplitude = finish(np.fft.fftshift(spectrum, axes=0))
     frequency = np.fft.rfftfreq(nt, d=dt_seconds)
     if verbose:
         print(f"{label}: {nz} depths x {nt} times, "

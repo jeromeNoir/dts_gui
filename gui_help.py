@@ -324,7 +324,10 @@ out of the decomposition takes the interfaces of <code>Combined</code>.</li>
 <li><b>Individual profiles</b> (Load preprocessed data, Multi-layer
 decomposition, wavenumber domain, temperature-gradient maps, staircases
 detection): one shared list of
-profiles (label, UTC time). A profile added, edited or removed in any of
+profiles (label, UTC time). The tick box in front of each label turns the
+profile on or off: an unticked profile stays in the table (and in the
+settings files) but is left out of every analysis, figure and list. A
+profile added, edited, ticked or removed in any of
 these tables (by hand, with + row / − row / Clear, or by a click on a map
 with the toggle <i>Select … on the map</i>) is copied at once to the others;
 a profile picked on a map takes the nearest profile time and the first free
@@ -386,7 +389,10 @@ maps</i> (all ticked after loading; only the maps and individual profiles of
 this panel), <i>Include the LéXPLORE chain</i>, <i>Time window</i>;
 <b>Update maps</b>.</li>
 <li><b>Time windows</b>: table (label, start, end in UTC; labels W1, W2, …
-given automatically); the toggle <i>Select windows on the T(z, t) map</i>
+given automatically), with a tick box in front of each label: only the
+ticked windows appear in the <i>Time window</i> lists of every step and are
+shaded on the maps; an unticked window is kept in the table and in the
+settings files; the toggle <i>Select windows on the T(z, t) map</i>
 adds a window by a horizontal drag on the map. The windows are shaded in
 blue, with their labels, on every map of the analysis whose x axis is the
 time (UTC) — the T(z, t) maps, N(z, t), the gradient maps, the layers and
@@ -500,13 +506,44 @@ the <i>Layer</i> lists of the following steps; running the decomposition
 again marks the steps that use Z1 and Z2 as outdated.</li>
 </ul>
 
+<h2>Spectrum options (every FFT)</h2>
+<p>Every step with a Fourier transform — the frequency domain (both tabs),
+the wavenumber domain and the 2D FFT — has the same options (?):</p>
+<ul>
+<li><b>Quantity</b> (not for the isotherm depth): <i>T</i> or its vertical
+gradient <i>dT/dz</i> (K/m, centred differences).</li>
+<li><b>Detrend</b>: every series (a profile along depth, or the record at
+one depth along time) loses its mean (<i>constant</i>) or its least-squares
+line (<i>linear</i>: mean and linear trend) before the FFT. The FFT treats
+the series as one period of a periodic signal; a trend left in it makes a
+jump between the two ends whose amplitude spectrum decreases as 1/k (or 1/f)
+and hides the true slope — a stratified profile always has such a trend
+along depth. In the 2D FFT the series are detrended over time at each depth,
+then along depth at each time.</li>
+<li><b>Window</b>: <i>none</i>, <i>Hann</i>, <i>Hamming</i>,
+<i>Blackman</i> or <i>Tukey (25 %)</i>: a taper that goes to zero at the
+ends of the series and reduces the leakage of the strong low frequencies
+(wavenumbers) into the high ones (in the 2D FFT, in both directions).</li>
+<li><b>Spectrum</b>: <i>FFT amplitude</i> 2|X|/Σw, in the units of the
+quantity (K, K/m, m: a sinusoid keeps its amplitude whatever the window), or
+<i>Power spectral density</i> 2|X|²/(f<sub>s</sub> Σw²), in units² per Hz,
+per cycle per metre (cpm) or per Hz·cpm, whose integral is the variance.
+The published spectral laws are written for the power: a power slope k⁻ⁿ
+is an amplitude slope k<sup>−n/2</sup> (Garrett–Munk k⁻² power = k⁻¹
+amplitude; saturation range k⁻³ power = k⁻¹·⁵ amplitude).</li>
+<li>The colour bars, axis labels and titles give the spectrum and the
+quantity; the instrument-resolution floor applies to the FFT amplitude of
+T only. The options are written in the log.</li>
+</ul>
+
 <h2>Spectral analysis – frequency domain</h2>
 <p>Box <b>Channels</b> (shared), then two tabs, each with its own options,
 <b>Run</b> and <b>Display</b>.</p>
 <h3>Tab Temperature at each depth</h3>
 <ul>
 <li><b>Options</b>: <i>Layer</i>, <i>Smooth N</i> (?) with <i>N window
-width / step</i> (smoothing of the N overlay; step auto = width),
+width / step</i> (smoothing of the N overlay; step auto = width), the
+spectrum options (quantity, detrend, window, spectrum),
 <b>Run</b>; the latitude of f is set in Advanced › Physical parameters. At every depth, the temperature anomaly is Fourier-transformed
 over time (amplitude 2|X|/n). Result: <i>Frequency × depth</i> maps, with
 the time-mean N profile (white) and the Coriolis frequency
@@ -522,6 +559,7 @@ and its scale (log or linear).</li>
 <ul>
 <li><b>Options</b>: <i>Isotherm</i>, <i>Poincaré profiles</i> (?) (<i>Same
 as DTS time window</i> or one of the windows W1, W2, …),
+detrend, window and spectrum of the isotherm-depth FFT,
 <b>Run</b> (lake width, g and equation of state: Advanced › Physical
 parameters). The depth of the isotherm is Fourier-transformed over the time
 window of the Channels box (no layer). Results: <i>Depth vs time</i> and
@@ -541,8 +579,9 @@ period on the top axis, or period in hours) and its scale.</li>
 
 <h2>Spectral analysis – wavenumber domain</h2>
 <ul>
-<li><b>Channels</b> (with <i>Layer</i> and <b>Run</b>): every profile is
-Fourier-transformed along depth (anomaly, amplitude 2|X|/n). The chain is
+<li><b>Channels</b> (with <i>Layer</i>) and <b>Spectrum</b> (quantity,
+detrend, window, spectrum, <b>Run</b>): every profile (T or dT/dz) is
+Fourier-transformed along depth. The chain is
 first interpolated on a uniform grid at its median sensor spacing.</li>
 <li><b>Individual profiles</b>: the shared list, the toggle <i>Select
 individual profiles on the map</i> (a click on the Time × k_z map) and
@@ -562,17 +601,19 @@ the spectra</i> sets them by a horizontal drag on that figure (whatever the
 axis, wavelength or wavenumber). <b>Fit scaling</b> fits a scaling law
 A = a k<sup>b</sup> (least squares on log10 A vs log10 k) to every curve of
 every panel within the range: the laws are drawn dashed, in the colour of
-their curve, with a and b in the legend, and listed in the log.</li>
+their curve, with a and b in the legend, and listed in the log; that
+figure is brought forward.</li>
 </ul>
 
 <h2>2D FFT of the water column</h2>
 <ul>
 <li><b>Channels</b>: channels, chain, time window, <b>Layers</b> (tick boxes:
 <i>Whole column</i> and the layers of the last Multi-layer decomposition;
-several can be ticked) and <b>Run</b>. For every channel and every layer
-ticked, 2D Fourier transform over depth and time of the depths between the
-time-mean interfaces of the layer (each depth demeaned and detrended),
-amplitude 2|F|/(nz nt); the +k_z and −k_z amplitudes are summed (both
+several can be ticked), then <b>Spectrum</b> (quantity, detrend, window,
+spectrum) and <b>Run</b>. For every channel and every layer ticked, 2D
+Fourier transform over depth and time (T or dT/dz) of the depths between
+the time-mean interfaces of the layer (detrended over time, then over
+depth; tapered in both directions); the +k_z and −k_z amplitudes are summed (both
 vertical directions together).</li>
 <li><b>Display</b>: shading, colour map, <i>Vertical axis</i> (wavenumber or
 wavelength), <i>Horizontal axis</i> (frequency or period), <i>Instrument

@@ -245,6 +245,60 @@ def resolution_option(label="Colour floor = ½ resolution"):
                     "of the colour (or amplitude) scale")
 
 
+SPECTRUM_HELP = (
+    "<b>Quantity</b>: T analyses the temperature itself; dT/dz analyses "
+    "the vertical temperature gradient (K/m, centred differences).<br>"
+    "<b>Detrend</b>: before the FFT, every series (a profile along depth, "
+    "or the record at one depth along time) loses its mean ('constant') or "
+    "its least-squares line ('linear': mean and linear trend). The FFT "
+    "treats the series as one period of a periodic signal: a trend left in "
+    "it makes a jump between the two ends, whose spectrum decreases as 1/k "
+    "(or 1/f) in amplitude and hides the true slope. A stratified profile "
+    "always has such a trend along depth.<br>"
+    "<b>Window</b>: the series is multiplied by a taper going to zero at "
+    "the ends (Hann, Hamming, Blackman, Tukey with 25 % cosine ends), which "
+    "reduces the leakage of the remaining jump and of the strong low "
+    "wavenumbers into the high ones; 'none' keeps the series as it is. The "
+    "amplitude is corrected for the window (a sinusoid keeps its "
+    "amplitude).<br>"
+    "<b>Spectrum</b>: 'FFT amplitude' = 2|X|/Σw, in the units of the "
+    "quantity (K, K/m, m); 'Power spectral density' = 2|X|²/(fs Σw²), in "
+    "units² per cycle per second (Hz) or per metre (cpm), whose integral is "
+    "the variance. The published spectral laws are written for the power: "
+    "a power slope k⁻ⁿ is an amplitude slope k^(−n/2) (Garrett–Munk k⁻² "
+    "power = k⁻¹ amplitude; saturation range k⁻³ power = k⁻¹·⁵ amplitude).")
+
+
+def spectrum_fields(prefix="", quantity=True, detrend="linear",
+                    window="Hann", only_for=None):
+    """Options shared by every FFT: quantity analysed (T or dT/dz),
+    detrending, window and amplitude or power."""
+    extra = dict(only_for=only_for) if only_for else {}
+    fields = []
+    if quantity:
+        fields.append(dict(name=prefix + "SPECTRUM_QUANTITY",
+                           label="Quantity", kind="choice",
+                           choices=["T", "dT/dz"], default="T",
+                           help=SPECTRUM_HELP, **extra))
+    fields += [
+        dict(name=prefix + "DETREND", label="Detrend", kind="choice",
+             choices=["constant", "linear"], default=detrend,
+             tip="constant: remove the mean; linear: remove the mean and "
+                 "the linear trend of every series before the FFT",
+             **({} if quantity else dict(help=SPECTRUM_HELP)), **extra),
+        dict(name=prefix + "WINDOW", label="Window", kind="choice",
+             choices=["none", "Hann", "Hamming", "Blackman",
+                      "Tukey (25 %)"], default=window,
+             tip="Taper applied to every series before the FFT", **extra),
+        dict(name=prefix + "SPECTRUM_KIND", label="Spectrum", kind="choice",
+             choices=["FFT amplitude", "Power spectral density"],
+             default="FFT amplitude",
+             tip="FFT amplitude 2|X|/Σw, or power spectral density "
+                 "2|X|²/(fs Σw²)", **extra),
+    ]
+    return fields
+
+
 # ---------------------------------------------------------------------------
 # PREPROCESSING
 # ---------------------------------------------------------------------------
@@ -827,6 +881,7 @@ ANALYSIS = [
                                  "by side)"),
                         dict(kind="note", label="Latitude of the Coriolis "
                              "frequency: Advanced › Physical parameters"),
+                        *spectrum_fields(),
                         dict(name="_run", label="Run", kind="button",
                              step="ana.3.1"),
                     ]),
@@ -884,6 +939,7 @@ ANALYSIS = [
                         dict(kind="note", label="Lake width, gravity and "
                              "equation of state of the Poincaré estimate: "
                              "Advanced › Physical parameters"),
+                        *spectrum_fields("ISO_", quantity=False),
                         dict(name="_run", label="Run", kind="button",
                              step="ana.3.2"),
                     ]),
@@ -911,7 +967,8 @@ ANALYSIS = [
                      "the spectra of the example instants of 0.1."),
         hide_run=True,
         params=[
-            ("Channels", analysis_channels()[1] + [
+            ("Channels", analysis_channels()[1]),
+            ("Spectrum", spectrum_fields() + [
                 dict(name="_run", label="Run", kind="button",
                      step="ana.4.1.1")]),
             ("Individual profiles", [
@@ -986,6 +1043,8 @@ ANALYSIS = [
                      tip="Parts of the water column transformed, one panel "
                          "each: the whole column and the layers of the "
                          "Multi-layer decomposition (run it first)"),
+                ]),
+            ("Spectrum", spectrum_fields() + [
                 dict(name="_run", label="Run", kind="button",
                      step="ana.4.1.2")]),
             display_group("ana.4.1.2", extra=[

@@ -46,7 +46,7 @@ from gui_sections import MENUS, all_groups                 # noqa: E402
 from gui_widgets import FigurePanel, ParameterPanel        # noqa: E402
 import gui_widgets                                         # noqa: E402
 
-VERSION = "3.32"
+VERSION = "3.35"
 VERSION_DATE = "16.11.2026"
 dts_steps.core.WRITER = f"DTS GUI v{VERSION}"
 
@@ -437,7 +437,8 @@ class MainWindow(QMainWindow):
                 panel.set_channel_choices(source, channels)
             panel.set_window_choices(self.window_items)
             panel.set_layer_choices(self.layer_items)
-            panel.set_profile_choices(self.shared_profiles or [])
+            panel.set_profile_choices(gui_widgets.TimeTable.active_rows(
+                self.shared_profiles or []))
             # channels ticked in one step: same ticks in every step
             for name, spec in panel.specs.items():
                 if spec["kind"] == "channels" and name in ("CHANNELS",
@@ -642,10 +643,12 @@ class MainWindow(QMainWindow):
             "to redraw")
 
     @staticmethod
-    def focus_figure(figure_panel, owner):
+    def focus_figure(figure_panel, owner, key=None):
         """Bring forward the main figure of a step (e.g. the spectrum of
-        3.2 rather than its first figure)."""
-        title = dts_steps.FOCUS_FIGURE.get(owner)
+        3.2 rather than its first figure); ``key``: the action run (e.g.
+        Fit scaling), whose own figure wins."""
+        title = (dts_steps.FOCUS_FIGURE.get(key)
+                 or dts_steps.FOCUS_FIGURE.get(owner))
         page = figure_panel.pages.get((owner, title)) if title else None
         if page is not None and figure_panel.tabs.indexOf(page) >= 0:
             figure_panel.tabs.setCurrentWidget(page)
@@ -1172,7 +1175,7 @@ class MainWindow(QMainWindow):
         _, figure_panel = self.page(self.section_of(key))
         figure_panel.set_figures(
             owner, figures, "Done: this step makes no figure (see the log).")
-        self.focus_figure(figure_panel, owner)
+        self.focus_figure(figure_panel, owner, key)
         figure_panel.focus_pending(owner)     # e.g. a profile just ticked
         if owner.startswith("pre."):          # windows on every time map
             self.draw_fit_windows()
@@ -1539,7 +1542,8 @@ class MainWindow(QMainWindow):
         """Table of the time windows of Load preprocessed data changed: blank labels get
         W1, W2, ... and every list 'Time window' is updated."""
         table = self.pages["ana.0"][0].fields["WINDOWS"]
-        rows = [list(row) + [""] * (3 - len(row)) for row in table.value()]
+        rows = [list(row[:-1]) + [""] * (3 - len(row[:-1])) + [row[-1]]
+                for row in table.rows()]          # texts..., active
         used = {row[0] for row in rows if row[0]}
         number, changed = 1, False
         for row in rows:
@@ -1554,8 +1558,8 @@ class MainWindow(QMainWindow):
             table.set_value([tuple(row) for row in rows])
             table.blockSignals(False)
         self.window_items = [dts_steps.WHOLE_RECORD] + [
-            dts_steps.window_label(*row) for row in rows
-            if row[1].strip() and row[2].strip()]
+            dts_steps.window_label(*row[:3]) for row in rows
+            if row[3] and row[1].strip() and row[2].strip()]   # ticked only
         for panel, _ in self.pages.values():
             panel.set_window_choices(self.window_items)
         # the windows are shaded at the next Update plot
@@ -1660,7 +1664,7 @@ class MainWindow(QMainWindow):
         if self._syncing_profiles or source not in self.pages:
             return
         rows = [tuple(r) for r in self.pages[source][0].fields[
-            self.PROFILE_TABLES[source]].value()]
+            self.PROFILE_TABLES[source]].rows()]     # ticked or not
         self.shared_profiles = rows
         self._syncing_profiles = True
         try:
@@ -1668,12 +1672,13 @@ class MainWindow(QMainWindow):
                 if key == source or key not in self.pages:
                     continue
                 table = self.pages[key][0].fields[name]
-                if [tuple(r) for r in table.value()] != rows:
+                if [tuple(r) for r in table.rows()] != rows:
                     table.set_value(list(rows))
         finally:
             self._syncing_profiles = False
+        active = gui_widgets.TimeTable.active_rows(rows)
         for panel, _ in self.pages.values():    # lists of start times
-            panel.set_profile_choices(rows)
+            panel.set_profile_choices(active)
         if source != "ana.0" and "ana.0" in self.pages:
             self.update_profile_sublist()       # figure list of Load data
 
@@ -1906,7 +1911,7 @@ class MainWindow(QMainWindow):
         keys = [section["id"] for menu_name, section in self.sections
                 if menu is None or menu_name in self.settings_menus(menu)]
         settings = {"version": VERSION, "contents": word,
-                    "steps": {key: self.page(key)[0].values()
+                    "steps": {key: self.page(key)[0].state()
                               for key in keys}}
         if word in ("all", "analysis"):
             settings["physical_parameters"] = dict(dts_steps.core.PHYSICS)
