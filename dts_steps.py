@@ -1527,12 +1527,20 @@ def ana_0_2(session, p):
         N_depth[name], N_time[name] = depth, time
         peak = int(np.nanargmax(mean))
         unstable = np.isfinite(N_squared) & (N_squared < 0)
-        print(f"{name}: maximum time-average N = {1e3 * mean[peak]:.2f} mHz "
+        kind = "maximum N" if N.shape[1] == 1 else "maximum time-average N"
+        print(f"{name}: {kind} = {1e3 * mean[peak]:.2f} mHz "
               f"at {depth[peak]:.1f} m; N² < 0 (unstable) in "
               f"{100 * unstable.sum() / max(np.isfinite(N_squared).sum(), 1):.1f}"
               f" % of the points")
     S.update(A_N_PROFILES=N_profiles, A_N_MEAN=N_mean, A_N_STD=N_std,
              A_N_DEPTH=N_depth, A_N_TIME=N_time, A_N2_PROFILES=N2_profiles)
+    profile = S.get("A_PROFILE")
+    if profile:          # one individual profile: N itself, no average
+        S["A_N_PROFILE_CHOSEN"] = profile
+        return [("Mean N profiles", figs.n_mean_profiles(
+            N_mean, None, N_depth, S["A_MAX_DEPTH"],
+            title=f"Brunt-Väisälä frequency of profile {profile[0]} "
+                  f"({profile[1]} UTC, no time average)"))]
     return [("Mean N profiles", figs.n_mean_profiles(N_mean, N_std, N_depth,
                                                      S["A_MAX_DEPTH"])),
             ("N(z, t) maps", figs.n_maps(N_profiles, N_time, N_depth,
@@ -2929,6 +2937,46 @@ def windowed_data(S, window):
     return {"A_TIME": TIME, "A_Z": Z, "A_T": T, "A_LEXPLORE": chain}
 
 
+PROFILE_MARK = " @ "          # 'P1 @ 2026-10-21 04:57:02' in 'Time window'
+
+
+def parse_profile_choice(text):
+    """'P1 @ time' of a list 'Time window' -> (label, datetime64), else
+    None."""
+    if not text or PROFILE_MARK not in text:
+        return None
+    label, when = text.split(PROFILE_MARK, 1)
+    t = utc(when.strip())
+    if t is None:
+        raise StepError(f"individual profile {text!r}: time not understood")
+    return label.strip(), t
+
+
+def profile_data(S, label, when):
+    """The analysis records reduced to the one profile of each record
+    closest in time to ``when`` (no time averaging)."""
+    TIME, Z, T = {}, {}, {}
+    for channel, time in S["A_TIME"].items():
+        if not time.size:
+            continue
+        index = int(np.argmin(np.abs(time - when)))
+        TIME[channel] = time[index:index + 1]
+        Z[channel] = S["A_Z"][channel]
+        T[channel] = S["A_T"][channel][:, index:index + 1]
+        shift = (time[index] - when) / np.timedelta64(1, "s")
+        print(f"{channel}: profile {label} = {stamp(time[index])} UTC "
+              f"(dt = {shift:+.0f} s)")
+    chain = S.get("A_LEXPLORE") or {}
+    if chain and len(chain.get("time", [])):
+        index = int(np.argmin(np.abs(chain["time"] - when)))
+        keep = np.zeros(len(chain["time"]), bool)
+        keep[index] = True
+        chain = crop_chain(chain, keep)
+        print(f"LeXPLORE chain: profile {label} = "
+              f"{stamp(chain['time'][0])} UTC")
+    return {"A_TIME": TIME, "A_Z": Z, "A_T": T, "A_LEXPLORE": chain}
+
+
 WHOLE_COLUMN = "Whole column"
 
 
@@ -3013,11 +3061,13 @@ def _with_colour_map(function):
     def step(session, p):
         S = session.data
         window = parse_window(p.get("TIME_WINDOW"))
+        profile = parse_profile_choice(p.get("TIME_WINDOW"))
         layer = p.get("LAYER") or WHOLE_COLUMN
         layer = None if layer == WHOLE_COLUMN else layer.split(":")[0]
         if getattr(function, "own_layer", False) and window is None:
             layer = None                      # the step applies the layer
-        if (window is None and layer is None) or "A_T" not in S:
+        nothing = window is None and layer is None and profile is None
+        if nothing or "A_T" not in S:
             return apply_colour_map(function(session, p) or [],
                                     p.get("CMAP"))
         saved = {key: S.get(key) for key in WINDOWED_KEYS}
@@ -3029,6 +3079,11 @@ def _with_colour_map(function):
             S["A_WINDOW"] = (window[0], str(window[1]), str(window[2]))
             print(f"time window {window[0]}: {stamp(window[1])} -> "
                   f"{stamp(window[2])} UTC")
+        elif profile is not None:              # one profile, no averaging
+            windowed.update(profile_data(S, *profile))
+            S.update(windowed)
+            S["A_PROFILE"] = (profile[0], stamp(profile[1]))
+            window = (profile[0], None, None)
         if layer is not None and not getattr(function, "own_layer", False):
             windowed.update(layered_data(S, layer, window))
             S.update(windowed)
@@ -3043,6 +3098,7 @@ def _with_colour_map(function):
                     S[key] = saved[key]
             S["A_IS_LEXPLORE"] = saved_flag
             S.pop("A_WINDOW", None)
+            S.pop("A_PROFILE", None)
             S.pop("A_LAYER", None)
         window = (" ".join(x for x in (
             (window[0] if len(window) == 3 else None), layer) if x),)

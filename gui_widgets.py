@@ -1360,10 +1360,23 @@ class ParameterPanel(QWidget):
                 self.fields["CHANNELS"].set_choices(channels, channels)
 
     def set_profile_choices(self, rows):
-        """Drop-downs of times ('profile_time'): the individual profiles."""
+        """Drop-downs of times ('profile_time'): the individual profiles
+        (and the lists 'Time window' that offer them)."""
         for name, spec in self.specs.items():
             if spec["kind"] == "profile_time":
                 self.fields[name].set_profiles(rows)
+        self._profile_rows = [tuple(r[:2]) for r in rows or []
+                              if len(r) >= 2 and str(r[1]).strip()]
+        if getattr(self, "_window_items", None):
+            self.set_window_choices(self._window_items)
+
+    PROFILE_MARK = " @ "         # 'P1 @ 2026-10-21 04:57:02' in the lists
+
+    @staticmethod
+    def _choice_key(text):
+        if ParameterPanel.PROFILE_MARK in text:
+            return text.split(ParameterPanel.PROFILE_MARK)[0]
+        return text.split(":")[0]
 
     def set_layer_choices(self, items):
         """Lists 'Layer': the whole column and the layers of the multi-layer
@@ -1387,18 +1400,25 @@ class ParameterPanel(QWidget):
         """Lists 'Time window' of the panel: the whole record and the
         windows of Load preprocessed data (the current choice kept when still there,
         matched by its label)."""
+        self._window_items = list(items)
         for name, spec in self.specs.items():
             if spec["kind"] != "window":
                 continue
             combo = self.fields[name]
             current = combo.currentText()
-            label = current.split(":")[0]
+            label = self._choice_key(current)
+            entries = list(self._window_items)
             if spec.get("first_item"):     # e.g. 'Same as DTS time window'
-                items = [spec["first_item"]] + list(items[1:])
+                entries = [spec["first_item"]] + entries[1:]
+            if spec.get("profiles"):       # the individual profiles too
+                entries += [f"{label_}{self.PROFILE_MARK}{time}"
+                            for label_, time in getattr(
+                                self, "_profile_rows", [])]
+            items = entries
             combo.blockSignals(True)
             combo.clear()
             combo.addItems(items)
-            match = [i for i in items if i.split(":")[0] == label]
+            match = [i for i in items if self._choice_key(i) == label]
             combo.setCurrentText(match[0] if match else items[0])
             combo.blockSignals(False)
 

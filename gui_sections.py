@@ -107,13 +107,18 @@ def pre_channels():
 WHOLE_RECORD = "Whole record"
 
 
-def window_field():
+def window_field(profiles=False):
     """Time window of a step: the whole record or one of the windows W1,
-    W2, ... defined in Data analysis › Load preprocessed data."""
+    W2, ... defined in Data analysis › Load preprocessed data;
+    ``profiles``: the individual profiles P1, P2, ... too (one profile,
+    no time averaging)."""
     return dict(name="TIME_WINDOW", label="Time window", kind="window",
-                default=WHOLE_RECORD,
+                default=WHOLE_RECORD, profiles=profiles,
                 tip="Whole record, or one of the time windows defined in "
-                    "Load preprocessed data (the list follows the table)")
+                    "Load preprocessed data (the list follows the table)"
+                    + ("; or one individual profile: the profile of each "
+                       "record closest in time is used alone, with no "
+                       "time averaging" if profiles else ""))
 
 
 def all_groups(section):
@@ -215,12 +220,12 @@ def chain_field(default=True, tip=None):
     return field
 
 
-def analysis_channels(chain=True, layer=True):
+def analysis_channels(chain=True, layer=True, profiles=False):
     fields = [dict(name="CHANNELS", label="Channels", kind="channels",
                    choices="analysis", default=ANALYSIS_CHANNELS_DEFAULT)]
     if chain:
         fields.append(chain_field())
-    fields.append(window_field())
+    fields.append(window_field(profiles))
     if layer:
         fields.append(layer_field())
     return ("Channels", fields)
@@ -729,7 +734,7 @@ ANALYSIS = [
                      "time; time mean ± std and maps."),
         hide_run=True,
         params=[
-            ("Channels", analysis_channels(layer=False)[1] + [
+            ("Channels", analysis_channels(layer=False, profiles=True)[1] + [
                 dict(name="IS_N_SMOOTHING", label="Smooth T before N",
                      kind="bool", default=False,
                      help=("The temperature of the DTS channels is averaged "

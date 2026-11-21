@@ -462,9 +462,14 @@ averaged over depth in windows of <i>Window width</i> centred every
 <i>Window step</i> (auto = the width, windows side by side) <i>before</i>
 ∂T/∂z and N, so the noise is reduced before the square root; the chain is
 not smoothed. The <b>Run</b> button is in the Channels box.</li>
+<li><b>Time window</b>: the whole record, a time window W1, W2, … or an
+individual profile (<i>P1 @ time</i>, the ticked profiles of the shared
+list). With a profile, each record uses its profile closest in time (the
+time offset is written in the log) and <b>no time averaging</b> is applied.</li>
 <li>Results: <i>Mean N profiles</i> (time mean ± one standard deviation per
-record) and <i>N(z, t) maps</i>. The mean N is used by the frequency-domain
-step (overlay and N band).</li>
+record; with an individual profile, N of that profile alone, without band)
+and <i>N(z, t) maps</i> (not drawn for an individual profile). The N
+profiles are used by the frequency-domain step (overlay and N band).</li>
 </ul>
 
 <h2>Multi-layer decomposition</h2>

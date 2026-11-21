@@ -468,12 +468,14 @@ def individual_profiles(TIME, Z, T, chain, profiles, max_depth):
     return fig
 
 
-def n_mean_profiles(N_mean, N_std, N_depth, max_depth):
+def n_mean_profiles(N_mean, N_std, N_depth, max_depth, title=None):
     fig = new_figure(7, 8)
     ax = fig.subplots()
     for index, name in enumerate(N_mean):
         c = color(name, index)
         ax.plot(N_mean[name], N_depth[name], "-", color=c, lw=1.5, label=name)
+        if N_std is None:                  # one profile: no spread
+            continue
         ax.fill_betweenx(N_depth[name],
                          np.maximum(N_mean[name] - N_std[name], 0.0),
                          N_mean[name] + N_std[name], color=c, alpha=0.2,
@@ -483,7 +485,8 @@ def n_mean_profiles(N_mean, N_std, N_depth, max_depth):
     ax.set_ylabel("depth (m)")
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
-    fig.suptitle("Time-average Brunt-Väisälä frequency (mean ± std)")
+    fig.suptitle(title or "Time-average Brunt-Väisälä frequency "
+                          "(mean ± std)")
     return fig
 
 
