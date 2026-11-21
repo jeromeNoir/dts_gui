@@ -26,8 +26,10 @@ figure and puts every panel back to its default values, with empty channel,
 window, layer and profile lists; files on disk are not touched; and
 Quit), <i>Preprocessing</i> (Load raw data,
 Depth Calibration, Save, Preprocessing report, then Open / Save preprocessing
-settings), <i>Data analysis</i> (Load preprocessed data and the analysis
-steps, then Open / Save analysis settings), <i>View</i> and <i>Help</i>.</li>
+settings), <i>Data analysis</i> (Save analysis settings at the top, then
+Load data and analysis settings and the analysis steps, then Save session
+and Load session; analysis settings are opened in Load data and analysis
+settings), <i>View</i> and <i>Help</i>.</li>
 <li><b>Panels</b>: the left part of the window shows the title of the menu
 item (with, in blue, the configuration of the data loaded in that menu), its state (run, not run, outdated) with the <b>Previous</b> /
 <b>Next</b> buttons, then its inputs grouped in boxes (a short description
@@ -263,7 +265,7 @@ attribute <code>kind</code>.</li>
 folder when the raw data are loaded; empty = the configuration folder) and
 <i>Preprocessed data file</i> (default <code>DTS_preprocessed.nc</code>;
 <code>.nc</code> added if missing). A README named after the file is written
-next to it. Load preprocessed data lists every preprocessed file of a
+next to it. Load data and analysis settings lists every preprocessed file of a
 configuration, whatever its name.</li>
 <li><b>Result</b>: <i>Calibrated T(depth, time)</i>, with the chain on top
 when it is loaded.</li>
@@ -312,7 +314,7 @@ is kept (temperature, surface and bottom temperature, mixed-layer and
 thermocline depth, Schmidt stability, heat content, …); the (?) lists those
 of the data loaded, with their units and sizes.</li>
 <li><b>Time window</b>: <i>Whole record</i> or one of the windows W1, W2, …
-defined in Load preprocessed data; the step then works on the profiles of
+defined in Load data and analysis settings; the step then works on the profiles of
 that window only, and its figure titles carry the label.</li>
 <li><b>Layer</b> (steps after the Multi-layer decomposition; tick boxes
 <b>Layers</b> in the 2D FFT): <i>Whole column</i> or one of the layers of the last decomposition (two layers:
@@ -321,7 +323,7 @@ layers: <i>Top mixed layer</i> surface – Z1, <i>Metalimnion</i> Z1 – Z2,
 <i>Bottom layer</i> Z2 – bottom). Unless said otherwise, the step works on
 the depths between the time-mean interfaces of that layer; a channel left
 out of the decomposition takes the interfaces of <code>Combined</code>.</li>
-<li><b>Individual profiles</b> (Load preprocessed data, Multi-layer
+<li><b>Individual profiles</b> (Load data and analysis settings, Multi-layer
 decomposition, wavenumber domain, temperature-gradient maps, staircases
 detection): one shared list of
 profiles (label, UTC time). The tick box in front of each label turns the
@@ -352,7 +354,18 @@ the figures follow at the next <b>Update plot</b>, so that editing stays
 fast after a complete processing (exceptions: ticking an individual profile
 in the figure list redraws its figure at once, and a figure shown again
 gets its time windows at once).</li>
-<li><b>Settings</b>: <i>Save analysis settings…</i> (bottom of the Data
+<li><b>Sessions</b>: <i>Data analysis › Save session…</i> writes a JSON
+file with everything needed to perform the analysis again: the inputs of
+every analysis and Advanced panel (data chosen, time windows, individual
+profiles, …), the physical parameters, and the <b>journal</b>: every step
+and every Python script run, in the order of their last run, each step with
+the inputs it used. <i>Data analysis › Load session…</i> opens a window:
+choose a session file (Browse…), check what it holds (data, journal), then
+<b>Execute</b>: the inputs and physical parameters are set, the data are
+loaded, and every entry of the journal is performed again in its order
+(scripts executed again, so the items they add to the Advanced menu come
+back with their inputs). It stops at the first step that fails.</li>
+<li><b>Settings</b>: <i>Save analysis settings…</i> (top of the Data
 analysis menu) writes a JSON file with the inputs of every analysis panel
 (tick boxes, choices, tables, time windows, individual profiles), the list
 of the <b>analysis steps run</b> since the data were loaded, in the order of
@@ -364,7 +377,7 @@ analysis settings…</i> fills the panels again; the data chosen in Load
 preprocessed data are kept.</li>
 </ul>
 
-<h2>Load preprocessed data</h2>
+<h2>Load data and analysis settings</h2>
 <ul>
 <li><b>Preprocessed data</b>: <i>Root folder</i> (whose sub-folders are the
 configurations); drop-down <i>Configuration</i> (the configurations that hold
@@ -696,8 +709,41 @@ Apply). The values are saved with the analysis settings and restored when
 they are opened; <i>File › Reset all</i> puts them back to the defaults.</li>
 </ul>
 
+<h2>Advanced › Python script</h2>
+<ul>
+<li>Runs a Python script of your own <b>inside the GUI</b>, on the data in
+memory. <i>Script</i>: the scripts of the GUI's folder
+<i>Example_Scripts</i> and those chosen with <b>Open…</b>; <b>New…</b>
+writes a template listing the names given to scripts. The text of the
+script is shown (read only: edit it in your editor; it is read again at
+each Execute).</li>
+<li><b>Execute</b> runs it. Its printed lines go to <i>Output</i> and to
+the log; an error is shown with its traceback (the GUI goes on). What the
+script puts in <code>results</code> is kept in the variable
+SCRIPT_RESULTS (one entry per script, in Save variables under
+<i>Advanced &gt; Python script</i>; the list below the output shows them),
+and its figures (<code>figure(title)</code>, <code>show(title, fig)</code>)
+appear on the right. <i>Remove the results of this script</i> deletes
+them.</li>
+<li>A script can read the inputs of any step (<code>params("ana.4.2.6")</code>),
+run the GUI's own function of a step (<code>run_step</code>), use the
+calculation library (<code>core</code>), the steps (<code>steps</code>) and
+the figures (<code>figs</code>), and <b>add an item of its own to the
+Advanced menu</b> (<code>add_advanced_step</code>, with
+<code>copy_section</code> to copy the panel of a step).</li>
+<li>Examples: <i>reproduce_temperature_gradient.py</i> (the results of
+Temperature-gradient maps computed again step by step and checked against
+the step) and <i>temperature_gradient_again.py</i> (adds the item
+<i>Temperature Gradient again</i>, an exact copy of Temperature-gradient
+maps). How to write scripts: <i>Claude_for_developer.md</i>, next to the
+GUI.</li>
+</ul>
+
 <h2>Advanced › Save variables…</h2>
 <ul>
+<li>Inside each step, two sub-groups: <b>Outputs</b> (the fields the
+step produces) and <b>Settings</b> (<i>settings_&lt;step&gt;</i>, the
+inputs of its last runs); each has its own tick box.</li>
 <li>Every variable in memory, <b>grouped by step</b> (<i>menu &gt;
 step</i>, in the order of the menus): a variable belongs to the step that
 first made it. Every step is listed, also before it is run ("nothing yet");
@@ -773,7 +819,7 @@ STC, chain − STC) and of the sound-speed differences (STC recalculated −
 STC measured, DTS − STC measured, chain − STC measured); every label gives the native depth resolution (Δz) of its data set and,
 for the DTS and the chain, its time shift
 — and the <i>Sound speed maps</i>: c(depth, time) of the Combined channel
-of the data loaded in <i>Data analysis › Load preprocessed data</i>, the
+of the data loaded in <i>Data analysis › Load data and analysis settings</i>, the
 start of every STC profile ticked inside the record as a dashed line (the
 map is left out, with a note in the log, when no data are loaded).</li>
 </ul></li>

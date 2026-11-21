@@ -1172,11 +1172,16 @@ class ParameterPanel(QWidget):
             target.addWidget(box)
         for page_layout in tab_layouts:
             page_layout.addStretch(1)
-        if not section["params"]:
+        factory = section.get("widget")       # a panel of its own (scripts)
+        self.custom = factory(self) if callable(factory) else None
+        if self.custom is not None:
+            body_layout.addWidget(self.custom, 1)
+        elif not section["params"]:
             note = QLabel("No input for this step.")
             note.setStyleSheet("color: gray; padding: 8px;")
             body_layout.addWidget(note)
-        body_layout.addStretch(1)
+        if self.custom is None:
+            body_layout.addStretch(1)
         scroll.setWidget(body)
         self.body = body
         self.scroll = scroll
@@ -1398,7 +1403,7 @@ class ParameterPanel(QWidget):
 
     def set_window_choices(self, items):
         """Lists 'Time window' of the panel: the whole record and the
-        windows of Load preprocessed data (the current choice kept when still there,
+        windows of Load data and analysis settings (the current choice kept when still there,
         matched by its label)."""
         self._window_items = list(items)
         for name, spec in self.specs.items():

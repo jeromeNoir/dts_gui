@@ -46,7 +46,7 @@ from gui_sections import MENUS, all_groups                 # noqa: E402
 from gui_widgets import FigurePanel, ParameterPanel        # noqa: E402
 import gui_widgets                                         # noqa: E402
 
-VERSION = "3.37"
+VERSION = "3.39"
 VERSION_DATE = "16.11.2026"
 dts_steps.core.WRITER = f"DTS GUI v{VERSION}"
 
@@ -116,6 +116,103 @@ class Worker(QThread):
             self.step_done.emit(self.key, figures)
 
 
+class SessionDialog(QWidget):
+    """Data analysis > Load session: the session file chosen, what it holds
+    (data, steps and scripts of its journal), and Execute."""
+
+    def __init__(self, main):
+        super().__init__(main, Qt.Window)
+        from PySide6.QtWidgets import QLineEdit
+        self.main = main
+        self.state = None
+        self.setWindowTitle("Load session")
+        self.resize(720, 520)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "Choose a session saved with Data analysis › Save session, "
+            "check what it holds, then press Execute: the inputs of the "
+            "panels and the physical parameters are set, the data are "
+            "loaded, and every step (and script) of the analysis is "
+            "performed again in its order, with its saved inputs."))
+        layout.itemAt(0).widget().setWordWrap(True)
+        row = QHBoxLayout()
+        self.path = QLineEdit()
+        self.path.setPlaceholderText("session file (.json)")
+        self.path.editingFinished.connect(lambda: self.read(self.path.text()))
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self.browse)
+        row.addWidget(self.path, 1)
+        row.addWidget(browse)
+        layout.addLayout(row)
+        self.summary = QPlainTextEdit()
+        self.summary.setReadOnly(True)
+        layout.addWidget(self.summary, 1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.execute_button = QPushButton("▶  Execute")
+        self.execute_button.setStyleSheet("font-weight: bold; "
+                                          "padding: 5px 18px;")
+        self.execute_button.setEnabled(False)
+        self.execute_button.clicked.connect(self.execute)
+        close = QPushButton("Close")
+        close.clicked.connect(self.close)
+        row.addWidget(self.execute_button)
+        row.addWidget(close)
+        layout.addLayout(row)
+
+    def browse(self):
+        folder = self.main.settings_folder("analysis") or os.path.expanduser(
+            "~")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load session", folder, MainWindow.SESSION_FILTER)
+        if path:
+            self.path.setText(path)
+            self.read(path)
+
+    def read(self, path):
+        """Read a session file and show what it holds."""
+        self.state = None
+        self.execute_button.setEnabled(False)
+        if not path:
+            return None
+        try:
+            with open(path, encoding="utf-8") as handle:
+                state = json.load(handle)
+        except (OSError, ValueError) as error:
+            self.summary.setPlainText(f"Cannot read the file:\n{error}")
+            return None
+        if state.get("contents") != "session" or "journal" not in state:
+            self.summary.setPlainText(
+                "This file is not a session (Data analysis › Save session). "
+                "Analysis settings are opened in Load data and analysis "
+                "settings › Open analysis settings…")
+            return None
+        data = (state.get("steps") or {}).get("ana.0") or {}
+        lines = [f"Saved by the DTS GUI v{state.get('version', '?')}"
+                 f" on {state.get('saved', '?')}", "",
+                 "Data: " + ", ".join(str(x) for x in
+                                      data.get("PREPROCESSED_FILES") or [])
+                 + f"  (root {data.get('PRODUCT_ROOT', '?')})", "",
+                 f"Journal ({len(state['journal'])} entries, performed in "
+                 "this order):"]
+        for number, entry in enumerate(state["journal"], 1):
+            if entry["type"] == "script":
+                lines.append(f"  {number}. script {entry['label']}  "
+                             f"({entry['path']})")
+            else:
+                lines.append(f"  {number}. {entry.get('label', '')}  "
+                             f"[{entry['step']}]")
+        self.summary.setPlainText("\n".join(lines))
+        self.state = state
+        self.execute_button.setEnabled(True)
+        return state
+
+    def execute(self):
+        if self.state is None and not self.read(self.path.text()):
+            return False
+        return self.main.execute_session(self.state)
+
+
 # ---------------------------------------------------------------------------
 # main window
 # ---------------------------------------------------------------------------
@@ -141,7 +238,8 @@ class MainWindow(QMainWindow):
                         for step in field.get("steps") or [field["step"]]:
                             self.panel_of_step.setdefault(step, section["id"])
         for step, owner in dts_steps.FIGURE_OWNER.items():
-            self.panel_of_step[step] = self.panel_of_step[owner]
+            if owner in self.panel_of_step:      # (steps of scripts: later)
+                self.panel_of_step[step] = self.panel_of_step[owner]
         self.menu_of = {s["id"]: m for m, s in self.sections}
         self.actions = {}
         self.pages = {}               # id -> (ParameterPanel, FigurePanel)
@@ -158,6 +256,8 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.queue = []
         self.analysis_runs = {}      # analysis step -> inputs, run order
+        self.journal = {}            # steps and scripts, order of last run
+        self._session_queue = []     # Load session: entries left to do
         self.saved_runs = []         # steps of an opened analysis settings
         self.current = None
         gui_widgets.HELP_EXTRA["INCLUDE_CHAIN"] = self.chain_variables_help
@@ -166,6 +266,12 @@ class MainWindow(QMainWindow):
         gui_widgets.HELP_EXTRA["LEXPLORE_FOLDER"] = \
             self.chain_resolution_help
         gui_widgets.CHANNEL_INFO_HANDLER = self.show_channel_info
+        # instance copies: a script may add its own step to them
+        self.PROFILE_TABLES = dict(self.PROFILE_TABLES)
+        self.PROFILE_PICKERS = dict(self.PROFILE_PICKERS)
+        import gui_script
+        self.section_by_id[gui_script.SCRIPT_STEP]["widget"] = \
+            lambda panel: self._make_script_box()
         self._build_menus()
         self._build_menu_toolbar()
         self._build_central()
@@ -185,7 +291,14 @@ class MainWindow(QMainWindow):
 
         for menu_name, sections in MENUS:
             menu = bar.addMenu(menu_name)
+            if "Data analysis" in menu_name:      # settings at the top
+                action = QAction("Save analysis settings…", self)
+                action.triggered.connect(
+                    lambda checked=False, m=menu_name: self.save_settings(m))
+                menu.addAction(action)
+                menu.addSeparator()
             if "Advanced" in menu_name:
+                self.advanced_menu = menu
                 for text, slot in (("Physical parameters…",
                                     self.show_physics),
                                    ("Save variables…",
@@ -214,6 +327,17 @@ class MainWindow(QMainWindow):
             # physical parameters are saved with the analysis settings)
             plain = menu_name.replace("&", "")
             if plain == "Advanced":
+                continue
+            if plain == "Data analysis":
+                # open the settings: in Load data and analysis settings;
+                # sessions: everything to perform the analysis again
+                menu.addSeparator()
+                for text, slot in (("Save session…", self.save_session),
+                                   ("Load session…", self.show_load_session)):
+                    action = QAction(text, self)
+                    action.triggered.connect(
+                        lambda checked=False, f=slot: f())
+                    menu.addAction(action)
                 continue
             word = ("preprocessing" if "reprocess" in plain else "analysis")
             menu.addSeparator()
@@ -661,7 +785,7 @@ class MainWindow(QMainWindow):
                 keys.append("ana.6")
             else:
                 self.write_log("\nSound-speed map not drawn: load data in "
-                               "Data analysis › Load preprocessed data to "
+                               "Data analysis › Load data and analysis settings to "
                                "get it\n")
             self.run_steps(keys)
             return
@@ -892,22 +1016,19 @@ class MainWindow(QMainWindow):
         """Steps of Save variables: ('Menu > step' in the menu order,
         {step key: 'Menu > step'}) for every step and action of the GUI."""
         order, category = [], {}
-        for menu, sections in MENUS:
-            for section in sections:
-                label = f"{menu.replace('&', '')} > {section['title']}"
-                order.append(label)
+        label_of = {}
+        for menu, section in self.sections:     # menus + items of scripts
+            label = f"{menu} > {section['title']}"
+            label_of[section["id"]] = label
+            order.append(label)
         for key in list(dts_steps.STEPS) + list(self.section_by_id):
             owner = dts_steps.FIGURE_OWNER.get(key, key)
             for candidate in (key, owner):
                 section_id = self.panel_of_step.get(candidate)
                 if section_id is None and candidate in self.section_by_id:
                     section_id = candidate
-                if section_id is not None:
-                    menu = next(m for m, sections in MENUS
-                                if any(s["id"] == section_id
-                                       for s in sections))
-                    category[key] = (f"{menu.replace('&', '')} > "
-                                     f"{self.section_by_id[section_id]['title']}")
+                if section_id in label_of:
+                    category[key] = label_of[section_id]
                     break
         return order, category
 
@@ -1159,6 +1280,12 @@ class MainWindow(QMainWindow):
         else:
             self.queue = []
             self._end_section = None        # failed / interrupted: stay
+            if self._session_queue or getattr(self, "_session_running",
+                                              False):
+                self.write_log("Load session stopped: a step failed or was "
+                               "interrupted\n")
+            self._session_queue = []
+            self._session_running = False
             self.on_finished()
 
     def on_step_started(self, key):
@@ -1173,20 +1300,303 @@ class MainWindow(QMainWindow):
     def record_run(self, key):
         """Analysis steps run (computations, not display updates), in the
         order of their last run, with the inputs used."""
-        if not key.startswith("ana.") or key in dts_steps.DISPLAY_ONLY \
+        section = self.panel_of_step.get(key)
+        in_analysis = key.startswith("ana.") or (
+            self.menu_of.get(section) == "Advanced" and section != "adv.script")
+        if not in_analysis or key in dts_steps.DISPLAY_ONLY \
                 or key.endswith((".select", ".instants")):
             return
         if key == "ana.0":                    # new data: a new analysis
             self.analysis_runs = {}
+            self.journal = {k: v for k, v in self.journal.items()
+                            if v["type"] == "script"}   # scripts stay
         self.analysis_runs.pop(key, None)
         self.analysis_runs[key] = dict(self.session.params_used.get(key,
                                                                     {}))
+        self.journal.pop("step:" + key, None)
+        self.journal["step:" + key] = dict(
+            type="step", step=key, label=self.step_label(key),
+            inputs=dict(self.session.params_used.get(key, {})))
 
-    def on_step_done(self, key, figures):
-        self.record_run(key)
+    def record_script(self, path, ok):
+        """A script executed (Advanced > Python script): part of the
+        journal of the session (executed again by Load session)."""
+        if not ok:
+            return
+        entry = "script:" + os.path.abspath(path)
+        self.journal.pop(entry, None)
+        self.journal[entry] = dict(type="script", path=os.path.abspath(path),
+                                   label=os.path.basename(path))
+
+    # ---- sessions (Data analysis > Save session / Load session) ------------
+    SESSION_FILTER = "DTS session (*.json)"
+
+    def session_state(self):
+        """Everything needed to perform the analysis again: the inputs of
+        every analysis and Advanced panel (data selection, time windows,
+        individual profiles, ...), the physical parameters, and the journal
+        of the steps and scripts run, in order, with their inputs."""
+        keys = [section["id"] for menu, section in self.sections
+                if menu in ("Data analysis", "Advanced")]
+        return {"version": VERSION, "contents": "session",
+                "saved": __import__("datetime").datetime.now().isoformat(
+                    timespec="seconds"),
+                "steps": {key: self.page(key)[0].state() for key in keys},
+                "physical_parameters": dict(dts_steps.core.PHYSICS),
+                "journal": list(self.journal.values())}
+
+    def save_session(self, path=None):
+        """Data analysis > Save session: write session_state() to JSON."""
+        if not self.journal:
+            QMessageBox.information(self, "Save session",
+                                    "No analysis step has been run yet.")
+            return None
+        if path is None:
+            folder = self.settings_folder("analysis") or os.path.expanduser(
+                "~")
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save session",
+                os.path.join(folder, "DTS_analysis_session.json"),
+                self.SESSION_FILTER)
+            if not path:
+                return None
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        state = self.session_state()
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, indent=2, default=str)
+        self.write_log(f"session saved: {path}\n  journal: " + "; ".join(
+            entry["label"] for entry in state["journal"]) + "\n")
+        return path
+
+    def show_load_session(self):
+        """Data analysis > Load session: choose a saved session, see what
+        it holds, then Execute."""
+        dialog = getattr(self, "_session_dialog", None)
+        if dialog is None:
+            dialog = SessionDialog(self)
+            self._session_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        return dialog
+
+    def execute_session(self, state):
+        """Load a session and perform all its steps: the inputs of the
+        panels and the physical parameters are set, then every entry of the
+        journal is performed in its order (a step with its saved inputs,
+        a script executed again); Load data and analysis settings first."""
+        if self.busy_running():
+            return False
+        changed = dts_steps.core.set_physics(
+            state.get("physical_parameters") or {})
+        if changed and getattr(self, "_physics_dialog", None) is not None:
+            self._physics_dialog.load(dts_steps.core.PHYSICS)
+        self._session_steps = dict(state.get("steps") or {})
+        self._apply_session_panels()
+        journal = [dict(e) for e in state.get("journal") or []]
+        steps = [e["step"] for e in journal if e["type"] == "step"]
+        start = [] if "ana.0" in steps else [
+            dict(type="step", step="ana.0", inputs=None, label="Load data")]
+        if "ana.0.1" not in steps:
+            start.append(dict(type="step", step="ana.0.1", inputs=None,
+                              label="Maps and profiles"))
+        position = next((i for i, e in enumerate(journal)
+                         if e["type"] == "step" and e["step"] == "ana.0"),
+                        None)
+        if position is None:                     # data first, then the rest
+            journal = start + journal
+        else:
+            journal[position + 1:position + 1] = [
+                e for e in start if e["step"] == "ana.0.1"]
+        self._session_queue = journal
+        self._session_failed = False
+        self.write_log("\n===== Load session: " + "; ".join(
+            e.get("label") or e.get("step") or e.get("path", "")
+            for e in journal) + " =====\n")
+        self._continue_session()
+        return True
+
+    def _apply_session_panels(self):
+        """Inputs of the session for every panel that exists now (the
+        items of scripts get theirs once their script is executed)."""
+        for key, values in list(getattr(self, "_session_steps",
+                                        {}).items()):
+            if key in self.section_by_id:
+                self.page(key)[0].set_values(dict(values))
+                self._session_steps.pop(key)
+
+    def _continue_session(self):
+        """Next entry of the session journal (called again when a step
+        ends)."""
+        from PySide6.QtCore import QTimer
+        while self._session_queue:
+            entry = self._session_queue.pop(0)
+            if entry["type"] == "script":
+                path = entry["path"]
+                if not os.path.exists(path):
+                    self.write_log(f"Load session: script not found, "
+                                   f"skipped: {path}\n")
+                    continue
+                self.page("adv.script")
+                ok = self.script_box.execute(path)
+                self._apply_session_panels()     # e.g. an item it added
+                if not ok:
+                    self.write_log("Load session stopped: the script "
+                                   f"{entry['label']} failed\n")
+                    self._session_queue = []
+                    return
+                continue
+            key = entry["step"]
+            if key not in dts_steps.STEPS:
+                self.write_log(f"Load session: unknown step {key}, "
+                               "skipped\n")
+                continue
+            inputs = entry.get("inputs")
+            job = (key, None, inputs) if inputs else (key, None)
+            self._session_running = True
+            self.start([job])
+            return                               # on_finished continues
+        if getattr(self, "_session_running", False):
+            self._session_running = False
+            self.write_log("Load session: all the steps performed\n")
+            QTimer.singleShot(0, lambda: self.show_section("ana.0"))
+
+    def refresh_save_variables(self):
         dialog = getattr(self, "_save_variables_dialog", None)
         if dialog is not None and dialog.isVisible():
             dialog.fill()                    # new variables listed at once
+
+    # ---- Advanced > Python script ------------------------------------------
+    def _make_script_box(self):
+        import gui_script
+        self.script_box = gui_script.ScriptBox(self)
+        return self.script_box
+
+    def script_namespace(self, path, results, lines, made):
+        """The names given to a script (Claude_for_developer.md, C.2)."""
+        import dts_core
+        import gui_figures
+        import gui_script
+        from matplotlib.figure import Figure
+        name = gui_script.script_key(path)
+
+        def log(text):
+            lines.append(str(text))
+            self.write_log(f"script {name}: {text}\n")
+
+        def figure(title, figsize=(10, 6)):
+            fig = Figure(figsize=figsize, layout="constrained")
+            made.append((title, fig))
+            return fig
+
+        def show(title, fig):
+            made.append((title, fig))
+            return fig
+
+        def params(step):
+            if step not in self.section_by_id and step in self.panel_of_step:
+                section = self.section_of(step)
+            else:
+                section = step
+            return self.page(section)[0].values(step)
+
+        def run_step(step, p=None):
+            function = dts_steps.STEPS[step][0]
+            return function(self.session, dict(params(step)) if p is None
+                            else dict(p)) or []
+
+        def records(p):
+            return dts_steps._records(self.session, p)
+
+        return dict(
+            session=self.session, S=self.session.data, np=np,
+            core=dts_core, steps=dts_steps, figs=gui_figures,
+            params=params, run_step=run_step, records=records,
+            results=results, figure=figure, show=show, log=log, gui=self,
+            QtWidgets=gui_script.QtWidgets, QtCore=gui_script.QtCore,
+            QtGui=gui_script.QtGui,
+            add_advanced_step=self.add_advanced_step,
+            copy_section=lambda source, new, title=None: __import__(
+                "gui_sections").copy_section(self.section_by_id, source,
+                                             new, title),
+            __name__="__dts_script__", __file__=path)
+
+    def show_script_figures(self, figures):
+        """The figures of the scripts, under Advanced > Python script."""
+        import gui_script
+        owner = gui_script.SCRIPT_STEP
+        self.session.figures[owner] = figures
+        figure_panel = self.page(owner)[1]
+        figure_panel.set_figures(owner, figures)
+        if figures and self.current == owner:
+            figure_panel.show_figure(owner, figures[-1][0])
+
+    def add_advanced_step(self, section, step_functions=None,
+                          profile_table=None, profile_picker=None):
+        """A new item of the Advanced menu, made by a script: ``section``
+        describes its panel (as in gui_sections, e.g. a copy_section of a
+        step), ``step_functions`` = {step key: (function, requires)} its
+        steps (registered with an Update-plot step each);
+        ``profile_table``: name of its table of individual profiles (kept
+        in the shared list of profiles); ``profile_picker``: (toggle name,
+        table name) to add profiles by a click on its maps.  Executing the
+        script again replaces the item."""
+        sid = section["id"]
+        section.setdefault("parent", None)
+        section.setdefault("number", sid)
+        section.setdefault("params", [])
+        for key, (function, requires) in (step_functions or {}).items():
+            dts_steps.register_step(key, function, requires)
+        if sid in self.pages:                         # replaced
+            panel, _ = self.pages.pop(sid)
+            self.left_stack.removeWidget(panel)
+            panel.deleteLater()
+        known = sid in self.section_by_id
+        self.section_by_id[sid] = section
+        if known:
+            self.sections = [(m, section if s["id"] == sid else s)
+                             for m, s in self.sections]
+        else:
+            self.sections.append(("Advanced", section))
+        self.menu_of[sid] = "Advanced"
+        steps = section.get("actions") or [sid]
+        for step in steps:
+            self.panel_of_step[step] = sid
+        for _, fields in all_groups(section):
+            for field in fields:
+                if field["kind"] == "button" and not str(
+                        field.get("step", "")).startswith("@"):
+                    for step in field.get("steps") or [field["step"]]:
+                        self.panel_of_step[step] = sid
+        for step, owner in dts_steps.FIGURE_OWNER.items():
+            if owner in steps:
+                self.panel_of_step[step] = sid
+        if profile_table:
+            self.PROFILE_TABLES[sid] = profile_table
+        if profile_picker:
+            self.PROFILE_PICKERS[sid] = (sid,) + tuple(profile_picker)
+        figure_panel = self.shared_panels.get("Advanced")
+        if figure_panel is not None:              # the result area exists
+            for step in steps:
+                if step not in figure_panel.order:
+                    figure_panel.order.append(step)
+                figure_panel.step_names[step] = self.step_label(step)
+            for entry in section.get("figures", ()):
+                if entry not in figure_panel.catalogue:
+                    figure_panel.catalogue.append(entry)
+                    figure_panel.default[entry[:2]] = bool(entry[2])
+            figure_panel.rebuild_list()
+        if sid not in self.actions:
+            self._add_action(self.advanced_menu, section, section["title"])
+        else:
+            self.actions[sid].setText(section["title"])
+        self.write_log(f"Advanced menu: item '{section['title']}' added\n")
+        return section
+
+    def on_step_done(self, key, figures):
+        self.record_run(key)
+        self.refresh_save_variables()
         owner = dts_steps.FIGURE_OWNER.get(key, key)
         if key not in dts_steps.DISPLAY_ONLY:
             self.done.add(key)
@@ -1331,6 +1741,9 @@ class MainWindow(QMainWindow):
         for panel, _ in self.pages.values():
             panel.set_running(False)
         self.statusBar().showMessage("Ready")
+        if self._session_queue or getattr(self, "_session_running", False):
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self._continue_session)
 
     def busy_running(self):
         return self.worker is not None or bool(getattr(self, "queue", []))
@@ -1514,9 +1927,9 @@ class MainWindow(QMainWindow):
             else:
                 self.detach_k_selection()
         elif name == "GRADIENT_SELECT":
-            if on:
-                panel = self.page("ana.4.2.6")[1]
-                if panel.show_figure("ana.4.2.6", "Maps"):
+            if on:                  # ana.4.2.6, or a copy made by a script
+                panel = self.page(key)[1]
+                if panel.show_figure(key, "Maps"):
                     self.statusBar().showMessage(
                         "Click on the gradient map to add a profile")
                 else:
@@ -1563,7 +1976,7 @@ class MainWindow(QMainWindow):
 
     # ---- analysis time windows ---------------------------------------------
     def on_windows_changed(self):
-        """Table of the time windows of Load preprocessed data changed: blank labels get
+        """Table of the time windows of Load data and analysis settings changed: blank labels get
         W1, W2, ... and every list 'Time window' is updated."""
         table = self.pages["ana.0"][0].fields["WINDOWS"]
         rows = [list(row[:-1]) + [""] * (3 - len(row[:-1])) + [row[-1]]
@@ -1707,7 +2120,7 @@ class MainWindow(QMainWindow):
             self.update_profile_sublist()       # figure list of Load data
 
     def on_profile_click(self, owner, x, y):
-        """A click on the T(z, t) map of Load preprocessed data or on the k_z map adds the
+        """A click on the T(z, t) map of Load data and analysis settings or on the k_z map adds the
         nearest profile to the table of individual profiles of that panel."""
         if owner not in self.PROFILE_PICKERS:
             return
@@ -1867,7 +2280,7 @@ class MainWindow(QMainWindow):
 
     def analysis_folder(self):
         """Default folder of the analysis settings: the configuration of
-        the first preprocessed file ticked in Load preprocessed data (else
+        the first preprocessed file ticked in Load data and analysis settings (else
         the first configuration ticked, else the folder of the data
         loaded)."""
         candidates = []
@@ -1983,7 +2396,8 @@ class MainWindow(QMainWindow):
             return
         jobs = [("ana.0", None), ("ana.0.1", None)]
         jobs += [(key, None, inputs) for key, inputs in self.saved_runs
-                 if key not in self.REPLAY_EXCLUDED]
+                 if key not in self.REPLAY_EXCLUDED
+                 and key in dts_steps.STEPS]   # e.g. a script's own step
         self.write_log("\n===== Run the saved analysis: " + "; ".join(
             self.step_label(job[0]) for job in jobs) + " =====\n")
         self._end_section = "ana.0"
@@ -2083,7 +2497,7 @@ class MainWindow(QMainWindow):
                 self.page(key)[0].set_values(values)
                 applied += 1
         if kept:
-            self.write_log("the data selection of Load preprocessed data is "
+            self.write_log("the data selection of Load data and analysis settings is "
                            "kept (root folder, configuration, file, chain "
                            "folder)\n")
         if word in ("all", "analysis"):
@@ -2101,7 +2515,7 @@ class MainWindow(QMainWindow):
                     f"{len(self.saved_runs)} analysis step(s) recorded in "
                     "the settings: " + "; ".join(
                         self.step_label(k) for k, _ in self.saved_runs)
-                    + "\n(Load preprocessed data › Run the saved analysis "
+                    + "\n(Load data and analysis settings › Run the saved analysis "
                     "runs them on the data chosen)\n")
         if not applied:
             QMessageBox.warning(self, "Open settings",

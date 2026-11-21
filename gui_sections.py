@@ -109,13 +109,13 @@ WHOLE_RECORD = "Whole record"
 
 def window_field(profiles=False):
     """Time window of a step: the whole record or one of the windows W1,
-    W2, ... defined in Data analysis › Load preprocessed data;
+    W2, ... defined in Data analysis › Load data and analysis settings;
     ``profiles``: the individual profiles P1, P2, ... too (one profile,
     no time averaging)."""
     return dict(name="TIME_WINDOW", label="Time window", kind="window",
                 default=WHOLE_RECORD, profiles=profiles,
                 tip="Whole record, or one of the time windows defined in "
-                    "Load preprocessed data (the list follows the table)"
+                    "Load data and analysis settings (the list follows the table)"
                     + ("; or one individual profile: the profile of each "
                        "record closest in time is used alone, with no "
                        "time averaging" if profiles else ""))
@@ -513,7 +513,7 @@ PREPROCESSING = [
                 dict(name="PRODUCT_NAME", label="Preprocessed data file",
                      kind="text", default="DTS_preprocessed.nc",
                      tip="Name of the netCDF file (.nc added if missing); "
-                         "Load preprocessed data lists every preprocessed "
+                         "Load data and analysis settings lists every preprocessed "
                          "file of the configuration"),
                 dict(name="_run_save", label="Save", kind="button",
                      step="pre.3",
@@ -563,7 +563,7 @@ PREPROCESSING = [
 ANALYSIS = [
     dict(
         id="ana.0", number="0", parent=None,
-        title="Load preprocessed data",
+        title="Load data and analysis settings",
         actions=["ana.0", "ana.0.1"],
         hidden_groups=["Maps", "Time windows",
                        "Select Individual profiles", "Display"],
@@ -622,7 +622,7 @@ ANALYSIS = [
                          "stays available to the analysis steps, each with "
                          "its own selection"),
                 chain_field(tip="Adds the chain (when available) to the "
-                                "maps of Load preprocessed data"),
+                                "maps of Load data and analysis settings"),
                 window_field(),
                 dict(name="_update", label="Update maps", kind="button",
                      step="ana.0.select",
@@ -935,12 +935,12 @@ ANALYSIS = [
                            "frequency; the band between the lowest and the "
                            "highest is shaded on the spectrum. 'Same as DTS "
                            "time window' uses the profiles of the FFT; the "
-                           "time windows W1, W2, ... come from Load preprocessed data."),
+                           "time windows W1, W2, ... come from Load data and analysis settings."),
                              kind="window", first_item="Same as DTS time window",
                              default="Same as DTS time window",
                              tip="Profiles used for the Poincaré estimate: those of "
                                  "the time window of the step, or one of the time "
-                                 "windows of Load preprocessed data (inside the DTS window)"),
+                                 "windows of Load data and analysis settings (inside the DTS window)"),
                         dict(kind="note", label="Lake width, gravity and "
                              "equation of state of the Poincaré estimate: "
                              "Advanced › Physical parameters"),
@@ -980,7 +980,7 @@ ANALYSIS = [
                 dict(name="KZ_PROFILES", label="Profiles (label, UTC time)",
                      kind="timetable", zone="UTC", default=[],
                      tip="Profiles whose vertical FFT is plotted; the "
-                         "profiles of Load preprocessed data are added automatically"),
+                         "profiles of Load data and analysis settings are added automatically"),
                 dict(name="KZ_SELECT",
                      label="Select individual profiles on the map",
                      on_text="on: click on the k_z map", kind="toggle",
@@ -1254,7 +1254,7 @@ ANALYSIS = [
 
 # ---------------------------------------------------------------------------
 # ADVANCED (the item Physical parameters… of this menu is a window, added by
-# dts_gui; the panels below work on the data of Load preprocessed data)
+# dts_gui; the panels below work on the data of Load data and analysis settings)
 # ---------------------------------------------------------------------------
 STC_ROOT = default_paths.get("stc")
 DTS_ROOT = default_paths.get("dts")
@@ -1335,7 +1335,7 @@ ADVANCED = [
                          "positions, one figure per STC profile "
                          "(temperature and sound speed vs depth) and the "
                          "sound-speed map of the Combined channel of the "
-                         "data loaded in Load preprocessed data (drawn "
+                         "data loaded in Load data and analysis settings (drawn "
                          "when data are loaded)"),
             ]),
             ("Resampling and display", [
@@ -1378,6 +1378,62 @@ ADVANCED = [
         ],
     ),
 ]
+
+ADVANCED.append(dict(
+    id="adv.script", number="A2", parent=None, title="Python script",
+    description=("Run a Python script of your own inside the GUI, on the "
+                 "data in memory: its results are kept (SCRIPT_RESULTS, in "
+                 "Save variables) and its figures shown here. A script can "
+                 "also add an item of its own to the Advanced menu. See "
+                 "Claude_for_developer.md and Example_Scripts/."),
+    hide_run=True, params=[], widget=None,      # widget: set by the GUI
+))
+
+
+def copy_section(sections, source_id, new_id, title=None, number=None):
+    """A copy of the description of a menu item (its boxes and fields) for
+    a new id: every step named in its buttons (source_id, source_id.xxx,
+    @update:source_id) is renamed to the new id, so that the copy runs its
+    own steps.  ``sections``: the sections of the GUI (id -> section)."""
+    import copy
+    section = copy.deepcopy(sections[source_id])
+    section.update(id=new_id, number=number or new_id, parent=None)
+    section.pop("actions", None)
+    if title:
+        section["title"] = title
+
+    def rename(step):
+        if not isinstance(step, str):
+            return step
+        if step == source_id:
+            return new_id
+        if step.startswith(source_id + "."):
+            return new_id + step[len(source_id):]
+        if step == "@update:" + source_id:
+            return "@update:" + new_id
+        return step
+
+    def walk(groups):
+        for item in groups:
+            if item[0] == "__tabs__":
+                for _, tab_groups in item[1]:
+                    walk(tab_groups)
+                continue
+            for field in item[1]:
+                if "step" in field:
+                    field["step"] = rename(field["step"])
+                if "steps" in field:
+                    field["steps"] = [rename(s) for s in field["steps"]]
+                if "only_for" in field:
+                    field["only_for"] = [rename(s) for s in field["only_for"]]
+    walk(section["params"])
+    section["figures"] = [(rename(owner), figure_title, shown)
+                          for owner, figure_title, shown
+                          in section.get("figures", ())]
+    if section.get("focus_owner"):
+        section["focus_owner"] = rename(section["focus_owner"])
+    return section
+
 
 MENUS = [("&Preprocessing", PREPROCESSING), ("&Data analysis", ANALYSIS),
          ("&Advanced", ADVANCED)]

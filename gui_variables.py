@@ -74,7 +74,7 @@ DESCRIPTIONS = {
                             "surface), temperature (°C)",
     "OUTPUT_FOLDER": "Folder where the preprocessed file is written",
     "PRODUCT_NAME": "Name of the preprocessed file written",
-    # ---- analysis: Load preprocessed data ---------------------------------
+    # ---- analysis: Load data and analysis settings ---------------------------------
     "A_FOLDERS": "Configuration folders of the preprocessed files loaded",
     "A_FILES": "Preprocessed files loaded (configuration / file)",
     "A_PRODUCT": "Content of the preprocessed files (concatenated in time)",
@@ -93,7 +93,7 @@ DESCRIPTIONS = {
                     "fibre inside the XT)",
     "A_RESOLUTION_ALL": "Instrument resolution of every channel found (K)",
     "A_RESOLUTION_KEY": "Fibre range used for the resolution (m)",
-    "A_LOAD_SELECTED": "Channels drawn on the maps of Load preprocessed data",
+    "A_LOAD_SELECTED": "Channels drawn on the maps of Load data and analysis settings",
     "A_PROFILE_TIMES": "Individual profiles (label, UTC time)",
     "A_RESAMPLE_WARNING": "Warning of the resampling, if any",
     "A_RESAMPLED": "Channels created by Resampling data",
@@ -555,6 +555,15 @@ class SaveVariablesDialog(QDialog):
         expanded = {self.tree.topLevelItem(i).text(0).split("  (")[0]
                     for i in range(self.tree.topLevelItemCount())
                     if self.tree.topLevelItem(i).isExpanded()}
+        expanded_groups = set()               # sub-groups left open
+        for i in range(self.tree.topLevelItemCount()):
+            top = self.tree.topLevelItem(i)
+            for j in range(top.childCount()):
+                child = top.child(j)
+                if child.isExpanded() and self.paths.get(
+                        id(child), ("",))[0] == "__category__":
+                    expanded_groups.add(top.text(0).split("  (")[0] + "/"
+                                        + child.text(0).split("  (")[0])
         self.tree.blockSignals(True)
         self.tree.clear()
         self.paths = {}
@@ -570,12 +579,41 @@ class SaveVariablesDialog(QDialog):
             top.setFlags(top.flags() | Qt.ItemIsUserCheckable
                          | Qt.ItemIsAutoTristate)
             self.paths[id(top)] = ("__category__", category)
-            # results first, the settings of the runs last
-            names = sorted(variables, key=lambda n: (
-                n.startswith(SETTINGS_PREFIX), n.lower()))
-            for name in names:
-                self._add(top, (name,), variables[name],
-                          self._description(category, name), 0, ticked)
+            names = sorted(variables, key=str.lower)
+            outputs = [n for n in names if not n.startswith(SETTINGS_PREFIX)]
+            settings = [n for n in names if n.startswith(SETTINGS_PREFIX)]
+            if category in (PHYSICS_CATEGORY, OTHER_CATEGORY):
+                groups = [(None, names)]           # one level only
+            else:                                  # a step: two sub-groups
+                groups = [(f"Outputs  ({len(outputs)})", outputs),
+                          (f"Settings  ({len(settings)})", settings)]
+            for title, members in groups:
+                if not members:
+                    continue
+                parent = top
+                if title is not None:
+                    parent = QTreeWidgetItem(top, [title, "", "", "",
+                                                   human_bytes(sum(
+                                                       memory(variables[n])
+                                                       for n in members))])
+                    font = parent.font(0)
+                    font.setItalic(True)
+                    parent.setFont(0, font)
+                    parent.setToolTip(1, (
+                        "the fields produced by the step" if title.startswith(
+                            "Outputs") else
+                        "the inputs of the step's last runs (settings_<step>)"))
+                    parent.setText(1, parent.toolTip(1))
+                    parent.setFlags(parent.flags() | Qt.ItemIsUserCheckable
+                                    | Qt.ItemIsAutoTristate)
+                    self.paths[id(parent)] = ("__category__",
+                                              f"{category}/{title}")
+                for name in members:
+                    self._add(parent, (name,), variables[name],
+                              self._description(category, name), 0, ticked)
+                if title is not None:
+                    parent.setExpanded(f"{category}/{title.split('  (')[0]}"
+                                       in expanded_groups)
             if not names:
                 top.setCheckState(0, Qt.Unchecked)
                 top.setDisabled(True)

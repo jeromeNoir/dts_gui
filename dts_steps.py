@@ -1024,7 +1024,7 @@ RESOLUTION_X_RANGE = (-20.0, -5.0)       # fibre inside the XT (m)
 
 
 def ana_0(session, p):
-    """Load preprocessed data: list the channels of the configurations ticked."""
+    """Load data and analysis settings: list the channels of the configurations ticked."""
     import netCDF4
     root = p.get("PRODUCT_ROOT") or ""
     names = [n for n in (p.get("CONFIGURATIONS") or []) if n]
@@ -1270,7 +1270,7 @@ def ana_0_3(session, p):
                             figs.raw_and_resampled(S, created, profile_times,
                                                    S["A_MAX_DEPTH"])))
         else:
-            print("no individual profile in the list of Load preprocessed data: no "
+            print("no individual profile in the list of Load data and analysis settings: no "
                   "profile figure")
     return figures
 
@@ -1494,7 +1494,7 @@ def ana_0_instants(session, p):
 
 
 def ana_0_replot(session, p):
-    """Select / Update plot: the maps of Load preprocessed data with the channels ticked
+    """Select / Update plot: the maps of Load data and analysis settings with the channels ticked
     and the display options (no data read again; the other steps keep
     their own channel selections)."""
     S = session.data
@@ -2173,7 +2173,7 @@ def ana_1(session, p):
 
 def layer_profile_list(S, p):
     """Individual profiles of the Multi-layer panel (the shared list; the
-    profiles of Load preprocessed data when the table is empty)."""
+    profiles of Load data and analysis settings when the table is empty)."""
     return (instants(p.get("LAYER_PROFILES") or [])
             or list(S.get("A_PROFILE_TIMES") or []))
 
@@ -2397,7 +2397,7 @@ def ana_4_2_6(session, p):
             f"{label} ({stamp(when)})" for label, when in profiles))
     else:
         print("no individual profile: add some in the Individual profiles "
-              "box (or in Load preprocessed data)")
+              "box (or in Load data and analysis settings)")
     return figures
 
 
@@ -2834,7 +2834,7 @@ SKIPS = {"pre.2.1": skip_chain, "pre.2.2": skip_manual}
 DISPLAY_ONLY = {"pre.1.replot", "pre.3.replot", "ana.0.instants",
                 "ana.4.1.1.fit",
                 "ana.0.replot", "ana.0.select"}
-# steps that use the individual profiles of Load preprocessed data
+# steps that use the individual profiles of Load data and analysis settings
 USE_PROFILE_TIMES = ("ana.4.1.1",)
 # figure brought forward after a run (instead of the first one)
 FOCUS_FIGURE = {"ana.3.2": "Spectrum",
@@ -2878,6 +2878,18 @@ STEPS = {
 # 'Update plot' step (<step>.replot) for every analysis step that draws
 # figures - the step drawn again, without marking the other steps outdated
 # ---------------------------------------------------------------------------
+def register_step(key, function, requires=("ana.0.1",), replot=True):
+    """A new step (e.g. made by a script): STEPS[key] = (function,
+    requires); with ``replot`` also its 'Update plot' step key.replot (the
+    same function, display only).  ``function(session, p)`` returns
+    [(title, figure)] like every step."""
+    STEPS[key] = (function, list(requires))
+    if replot:
+        STEPS[key + ".replot"] = (function, [key])
+        FIGURE_OWNER[key + ".replot"] = key
+        DISPLAY_ONLY.add(key + ".replot")
+
+
 def apply_colour_map(figures, cmap):
     """Colour map of every map (pcolormesh, image) of the figures; the
     colour bars follow.  'default' keeps the colour map of each figure."""
