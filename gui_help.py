@@ -26,9 +26,9 @@ figure and puts every panel back to its default values, with empty channel,
 window, layer and profile lists; files on disk are not touched; and
 Quit), <i>Preprocessing</i> (Load raw data,
 Depth Calibration, Save, Preprocessing report, then Open / Save preprocessing
-settings), <i>Data analysis</i> (Save analysis settings at the top, then
-Load data and analysis settings and the analysis steps, then Save session
-and Load session; analysis settings are opened in Load data and analysis
+settings), <i>Data analysis</i> (Save session, Load session and Save
+analysis settings at the top, then Load data and analysis settings and the
+analysis steps; analysis settings are opened in Load data and analysis
 settings), <i>View</i> and <i>Help</i>.</li>
 <li><b>Panels</b>: the left part of the window shows the title of the menu
 item (with, in blue, the configuration of the data loaded in that menu), its state (run, not run, outdated) with the <b>Previous</b> /

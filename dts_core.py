@@ -712,7 +712,7 @@ def save_product(root, uncalibrated, calibrated, shifts, attributes,
         f.title = "DTS preprocessed temperature record (DTS GUI)"
         f.configuration = os.path.basename(os.path.normpath(root))
         f.history = f"written {np.datetime64('now')} UTC by the {WRITER}"
-        f.source = (f"{WRITER} (GUI/dts_core.py, save_product); Silixa "
+        f.source = (f"{WRITER} (GUI_DTS/dts_core.py, save_product); Silixa "
                     "XT-DTS XT13002, MIRAGE October 2026")
         f.channels = ", ".join(channels)
         f.contents = ", ".join(
@@ -838,7 +838,7 @@ def _write_product_readme(root, filename, readme, uncalibrated, calibrated,
                           name=None):
     """README next to the product: what the file holds."""
     lines = [f"# {filename} — preprocessed DTS temperature record", "",
-             f"Written by the {WRITER} (GUI/dts_core.py, save_product) on "
+             f"Written by the {WRITER} (GUI_DTS/dts_core.py, save_product) on "
              f"{np.datetime64('now')} UTC for the "
              f"configuration `{name or os.path.basename(os.path.normpath(root))}`. "
              "All times are UTC (int64, ms since 1970-01-01).", "",

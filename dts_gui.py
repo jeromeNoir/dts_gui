@@ -46,7 +46,7 @@ from gui_sections import MENUS, all_groups                 # noqa: E402
 from gui_widgets import FigurePanel, ParameterPanel        # noqa: E402
 import gui_widgets                                         # noqa: E402
 
-VERSION = "3.40"
+VERSION = "3.42"
 VERSION_DATE = "16.11.2026"
 dts_steps.core.WRITER = f"DTS GUI v{VERSION}"
 
@@ -291,11 +291,16 @@ class MainWindow(QMainWindow):
 
         for menu_name, sections in MENUS:
             menu = bar.addMenu(menu_name)
-            if "Data analysis" in menu_name:      # settings at the top
-                action = QAction("Save analysis settings…", self)
-                action.triggered.connect(
-                    lambda checked=False, m=menu_name: self.save_settings(m))
-                menu.addAction(action)
+            if "Data analysis" in menu_name:      # sessions and settings
+                for text, slot in (                # at the top
+                        ("Save session…", self.save_session),
+                        ("Load session…", self.show_load_session),
+                        ("Save analysis settings…",
+                         lambda m=menu_name: self.save_settings(m))):
+                    action = QAction(text, self)
+                    action.triggered.connect(
+                        lambda checked=False, f=slot: f())
+                    menu.addAction(action)
                 menu.addSeparator()
             if "Advanced" in menu_name:
                 self.advanced_menu = menu
@@ -329,15 +334,8 @@ class MainWindow(QMainWindow):
             if plain == "Advanced":
                 continue
             if plain == "Data analysis":
-                # open the settings: in Load data and analysis settings;
-                # sessions: everything to perform the analysis again
-                menu.addSeparator()
-                for text, slot in (("Save session…", self.save_session),
-                                   ("Load session…", self.show_load_session)):
-                    action = QAction(text, self)
-                    action.triggered.connect(
-                        lambda checked=False, f=slot: f())
-                    menu.addAction(action)
+                # sessions and settings are at the top of the menu; the
+                # settings are opened in Load data and analysis settings
                 continue
             word = ("preprocessing" if "reprocess" in plain else "analysis")
             menu.addSeparator()
