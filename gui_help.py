@@ -354,6 +354,15 @@ the figures follow at the next <b>Update plot</b>, so that editing stays
 fast after a complete processing (exceptions: ticking an individual profile
 in the figure list redraws its figure at once, and a figure shown again
 gets its time windows at once).</li>
+<li><b>Maps of the project</b> (box of Load data and analysis settings):
+<i>Project root folder</i> (?) — the folder holding all the data of the
+project; by default the parent of the DTS folder of default_paths.ini (e.g.
+Data_October_2026) —, <i>Levels drawn</i> (folder levels below the root,
+3 by default) and <i>Show the files</i> (the first 5 files of each folder,
+then their number). <b>Build map</b> draws the figure <i>Project map</i>:
+the folder tree, each folder with its number of files, sub-folders and
+total size (always counted over the whole tree). The tree is also kept in
+the variable A_PROJECT_MAP.</li>
 <li><b>Sessions</b>: <i>Data analysis › Save session…</i> writes a JSON
 file with everything needed to perform the analysis again: the inputs of
 every analysis and Advanced panel (data chosen, time windows, individual

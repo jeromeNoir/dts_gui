@@ -1481,6 +1481,25 @@ def profile_item_name(label, text):
     return f"{label} – {str(text).strip()}"
 
 
+def ana_0_map(session, p):
+    """Maps of the project: the folder structure below the project root
+    folder (folders with their number of files, sub-folders and size)."""
+    root = (p.get("PROJECT_ROOT") or "").strip()
+    if not root or not os.path.isdir(root):
+        raise StepError("choose the project root folder (Maps of the "
+                        "project)")
+    depth = int(p.get("PROJECT_DEPTH") or 3)
+    with_files = bool(p.get("PROJECT_FILES"))
+    tree = core.project_tree(root, depth, with_files)
+    lines = core.project_tree_lines(tree, with_files)
+    session.data["A_PROJECT_MAP"] = dict(root=tree["path"], depth=depth,
+                                         lines=lines, tree=tree)
+    print(f"project map of {tree['path']}: {tree['n_folders']} folders, "
+          f"{tree['n_files']} files, {core.human_size(tree['size'])} "
+          f"(drawn down to {depth} levels)")
+    return [("Project map", figs.project_map(lines, tree["path"]))]
+
+
 def ana_0_instants(session, p):
     """Update of the individual profiles: the table becomes the list used by
     the analyses, marked on the maps."""
@@ -2855,6 +2874,7 @@ STEPS = {
     "ana.1": (ana_1, ["ana.0.1"]),
     "ana.0.3": (ana_0_3, ["ana.0.1"]),
     "ana.0.instants": (ana_0_instants, ["ana.0.1"]),
+    "ana.0.map": (ana_0_map, []),
     "ana.0.replot": (ana_0_replot, ["ana.0.1"]),
     "ana.0.select": (ana_0_replot, ["ana.0.1"]),
     "ana.0.2": (ana_0_2, ["ana.0.1"]),
@@ -3186,13 +3206,13 @@ for _key in CHAIN_AS_CHANNEL:
     STEPS[_key] = (_with_chain(_function, _key), _requires)
 
 for _key in [k for k in STEPS if k.startswith("ana.")
-             and k not in ("ana.0", "ana.0.1", "ana.5")]:
+             and k not in ("ana.0", "ana.0.1", "ana.0.map", "ana.5")]:
     _function, _requires = STEPS[_key]
     STEPS[_key] = (_with_colour_map(_function), _requires)
 for _key in [k for k in list(STEPS) if k.startswith("ana.")
              and k.count(".") >= 1 and not k.endswith((".replot", ".select", ".fit",
                                                        ".instants"))
-             and k not in ("ana.0", "ana.0.1", "ana.5")]:
+             and k not in ("ana.0", "ana.0.1", "ana.0.map", "ana.5")]:
     STEPS[_key + ".replot"] = (STEPS[_key][0], [_key])
     FIGURE_OWNER[_key + ".replot"] = _key
     DISPLAY_ONLY.add(_key + ".replot")

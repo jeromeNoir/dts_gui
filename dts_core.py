@@ -1794,6 +1794,96 @@ def physics(name):
     return PHYSICS.get(name, PHYSICS_DEFAULTS[name])
 
 
+def project_tree(root, max_depth=3, with_files=False, max_files=5):
+    """Folder structure of a project, for its map: a nested dict
+    {name, path, folders, files, size (bytes, all the files below), n_files
+    (below), n_folders (below), children: [...], file_list: [(name, size)]}
+    walked down to ``max_depth`` levels (sizes and counts always cover the
+    whole tree); hidden files and folders are left out."""
+    import os
+
+    def walk(path, depth):
+        node = dict(name=os.path.basename(path.rstrip(os.sep)) or path,
+                    path=path, size=0, n_files=0, n_folders=0, children=[],
+                    file_list=[])
+        try:
+            entries = sorted(os.scandir(path), key=lambda e: e.name.lower())
+        except OSError:
+            node["error"] = "cannot be read"
+            return node
+        for entry in entries:
+            if entry.name.startswith("."):
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    child = walk(entry.path, depth + 1)
+                    node["size"] += child["size"]
+                    node["n_files"] += child["n_files"]
+                    node["n_folders"] += 1 + child["n_folders"]
+                    if depth < max_depth:
+                        node["children"].append(child)
+                elif entry.is_file(follow_symlinks=False):
+                    size = entry.stat(follow_symlinks=False).st_size
+                    node["size"] += size
+                    node["n_files"] += 1
+                    node["file_list"].append((entry.name, size))
+            except OSError:
+                continue
+        node["own_files"] = len(node["file_list"])
+        if not with_files or depth >= max_depth:
+            node["file_list"] = []
+        return node
+    if not root or not os.path.isdir(root):
+        raise ValueError(f"not a folder: {root!r}")
+    return walk(os.path.abspath(root), 0)
+
+
+def human_size(n):
+    for unit in ("B", "kB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024.0
+
+
+def project_tree_lines(node, with_files=False, max_files=5):
+    """The map of project_tree as text lines (tree drawn with ├── └──):
+    each folder with its number of files, sub-folders and size."""
+    def label(n):
+        text = (f"{n['name']}/  ({n['n_files']} file"
+                + ("s" if n["n_files"] != 1 else ""))
+        if n["n_folders"]:
+            text += (f", {n['n_folders']} folder"
+                     + ("s" if n["n_folders"] != 1 else ""))
+        text += f", {human_size(n['size'])})"
+        if n.get("error"):
+            text += "  [" + n["error"] + "]"
+        return text
+
+    lines = [label(node)]
+
+    def visit(n, prefix):
+        items = [("folder", c) for c in n["children"]]
+        if with_files:
+            files = n["file_list"]
+            shown = files[:max_files]
+            items += [("file", f) for f in shown]
+            if len(files) > len(shown):
+                items.append(("more", len(files) - len(shown)))
+        for index, (kind, item) in enumerate(items):
+            last = index == len(items) - 1
+            branch = "└── " if last else "├── "
+            if kind == "folder":
+                lines.append(prefix + branch + label(item))
+                visit(item, prefix + ("    " if last else "│   "))
+            elif kind == "file":
+                lines.append(prefix + branch
+                             + f"{item[0]}  ({human_size(item[1])})")
+            else:
+                lines.append(prefix + branch + f"… and {item} more files")
+    visit(node, "")
+    return lines
+
+
 def set_physics(values):
     """Change physical parameters (unknown names are ignored); returns the
     names that changed."""

@@ -137,6 +137,8 @@ DESCRIPTIONS = {
     "A_GRADIENT_PROFILES": "Instants of the gradient profiles",
     "A_STAIRCASES": "Staircases detected at each individual profile",
     "A_SEISMOGRAM": "Profiles of the seismogram-like plot per channel",
+    "A_PROJECT_MAP": "Map of the project folder: root, levels drawn, the "
+                     "text lines of the tree and the tree (counts, sizes)",
     "A_CONFIGURATION_TABLE": "Configuration of the preprocessed data loaded",
     "A_STAIRCASE_TIMES": "Individual profiles of the last staircase "
                          "detection (label, UTC time)",

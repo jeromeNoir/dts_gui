@@ -47,6 +47,28 @@ import default_paths
 # default folders: read from default_paths.ini (personal, not in git; see
 # default_paths_template.ini and the README); '' when not set
 XT_TEMPERATURE_ROOT = default_paths.get("xt_temperature")
+
+
+def project_root_default():
+    """Project root: the parent of the DTS folder (from default_paths.ini:
+    the 'dts' folder, else the DTS folder above the XT temperature
+    folder), e.g. .../Data_October_2026."""
+    import os
+    for path in (default_paths.get("dts"), XT_TEMPERATURE_ROOT):
+        if not path:
+            continue
+        path = os.path.abspath(path)
+        while True:
+            if os.path.basename(path) == "DTS":
+                return os.path.dirname(path)
+            parent = os.path.dirname(path)
+            if parent == path:
+                break
+            path = parent
+    return ""
+
+
+PROJECT_ROOT_DEFAULT = project_root_default()
 LEXPLORE_ROOT = default_paths.get("lexplore")
 
 PRE_CHANNELS_DEFAULT = []               # filled when the data are loaded
@@ -564,12 +586,13 @@ ANALYSIS = [
     dict(
         id="ana.0", number="0", parent=None,
         title="Load data and analysis settings",
-        actions=["ana.0", "ana.0.1"],
+        actions=["ana.0", "ana.0.1", "ana.0.map"],
         hidden_groups=["Maps", "Time windows",
                        "Select Individual profiles", "Display"],
         figures=[("ana.0", "Configuration", True),
                  ("ana.0.1", "T(z, t) maps", True),
-                 ("ana.0.1", "Individual profiles", False)],
+                 ("ana.0.1", "Individual profiles", False),
+                 ("ana.0.map", "Project map", True)],
         description=(
             "Choose the root folder of the preprocessed data, the "
             "configuration and the preprocessed file, and press Load data. "
@@ -613,6 +636,28 @@ ANALYSIS = [
                      tip="Load the file chosen above, then run every "
                          "analysis step recorded in the settings opened, "
                          "in their order, with their saved inputs"),
+            ]),
+            ("Maps of the project", [
+                dict(name="PROJECT_ROOT", label="Project root folder",
+                     kind="dir", default=PROJECT_ROOT_DEFAULT,
+                     help=("The folder holding all the data of the project "
+                           "(DTS, LéXPLORE chain, STC/SVP profiles, maps, "
+                           "bathymetry, ...). Default: the parent of the "
+                           "DTS folder of default_paths.ini, e.g. "
+                           "Data_October_2026. Build map draws its folder "
+                           "structure: every folder with its number of "
+                           "files, sub-folders and total size.")),
+                dict(name="PROJECT_DEPTH", label="Levels drawn", kind="int",
+                     default=3, minimum=1, maximum=10,
+                     tip="Number of folder levels drawn below the root "
+                         "(the counts and sizes always cover the whole "
+                         "tree)"),
+                dict(name="PROJECT_FILES", label="Show the files",
+                     kind="bool", default=False,
+                     tip="Also list the files of each folder drawn (the "
+                         "first 5 of each, then their number)"),
+                dict(name="_project_map", label="Build map", kind="button",
+                     step="ana.0.map"),
             ]),
             ("Maps", [
                 dict(name="MAP_CHANNELS", label="Channels on the maps",

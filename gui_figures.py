@@ -468,6 +468,25 @@ def individual_profiles(TIME, Z, T, chain, profiles, max_depth):
     return fig
 
 
+def project_map(lines, root, max_lines=600):
+    """The folder tree of the project drawn as text (one line per folder or
+    file); a long tree is cut after ``max_lines`` lines."""
+    cut = len(lines) > max_lines
+    shown = lines[:max_lines] + ([f"… {len(lines) - max_lines} more lines "
+                                  "(lower the depth)"] if cut else [])
+    width = max(8.0, min(24.0, 0.075 * max(len(line) for line in shown)))
+    fig = new_figure(width, 0.9 + 0.17 * len(shown))
+    fig.set_layout_engine("none")        # text only: no layout needed
+    height = fig.get_figheight()
+    ax = fig.add_axes([0.01, 0.0, 0.98, 1.0 - 0.75 / height])
+    ax.axis("off")
+    ax.text(0.0, 1.0, "\n".join(shown), family="monospace", fontsize=8.5,
+            va="top", ha="left", transform=ax.transAxes)
+    fig.suptitle(f"Map of the project: {root}", fontsize=10, x=0.01,
+                 ha="left")
+    return fig
+
+
 def n_mean_profiles(N_mean, N_std, N_depth, max_depth, title=None):
     fig = new_figure(7, 8)
     ax = fig.subplots()
