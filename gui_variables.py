@@ -392,51 +392,81 @@ class VariablesDialog(QDialog):
 
 
 PHYSICS_ENTRY = "PHYSICAL_PARAMETERS"
-CATEGORIES = ("Preprocessing variables", "Analysis variables",
-              "Physical parameters", "STC variables")
-STC_VARIABLES = ("A_STC",)          # variables of the STC profiler
+PHYSICS_CATEGORY = "Advanced > Physical parameters"
+OTHER_CATEGORY = "Other (made outside a step)"
+SETTINGS_PREFIX = "settings_"       # settings_<step>: inputs of a run
 MAX_DEPTH = 3                      # levels of a dictionary listed
 
 
-def category_of(name):
-    """Category of a session variable (the physical parameters apart)."""
-    if name in STC_VARIABLES:
-        return "STC variables"
-    return ("Analysis variables" if name.startswith("A_")
-            else "Preprocessing variables")
+def settings_name(step):
+    """Name of the entry holding the inputs of a step run."""
+    return SETTINGS_PREFIX + step.replace(".", "_")
 
 
 class SaveVariablesDialog(QDialog):
-    """Advanced › Save variables: the variables in four categories
-    (preprocessing, analysis, physical parameters, STC), each category with
-    a tick box selecting all its variables, and every variable — and every
-    entry of a dictionary variable (channel, profile, ...) — with its own
-    tick box.  Save asks the file name, folder and format (npz, NetCDF,
-    HDF5, txt, csv, MATLAB)."""
+    """Advanced > Save variables: the variables grouped by step (menu >
+    step, in the order of the menus; every step listed, even when nothing
+    is in memory yet), each step with a tick box selecting all its
+    variables, and every variable — and every entry of a dictionary
+    variable (channel, profile, ...) — with its own tick box.  Each step
+    also holds the settings of its last run (settings_<step>), and the
+    physical parameters form a group of their own.  A search field keeps
+    the entries whose name, step or description hold all the keywords; the
+    full description of the row selected is shown below.  Save asks the
+    file name, folder and format (npz, NetCDF, HDF5, txt, csv, MATLAB).
+
+    ``steps()`` -> (categories in menu order, {step key: category}): the
+    GUI gives it; a variable belongs to the step that first made it
+    (session.origin)."""
 
     COLUMNS = ("Variable", "Description", "Format", "Size", "Memory")
 
-    def __init__(self, session, parent=None, log=print):
+    def __init__(self, session, parent=None, log=print, steps=None):
         super().__init__(parent)
         self.session = session
         self.log = log
+        self.steps = steps or (lambda: ([], {}))
         self.paths = {}            # id(item) -> path (name, key, key, ...)
         self.setWindowTitle("Save variables")
-        self.resize(1000, 700)
+        self.resize(1050, 720)
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "Tick the variables to save — a category ticks all its "
-            "variables, a variable ticks all its entries — then press "
-            "Save: the file name, the folder and the format (npz, NetCDF, "
-            "HDF5, txt, csv, MATLAB) are asked. The list is updated after "
-            "every step.")
+            "Tick the variables to save — they are grouped by step (menu > "
+            "step); a step ticks all its variables, a variable ticks all its "
+            "entries; All / None act on the entries shown (Search) — then "
+            "press Save: the file name, the folder and the format (npz, "
+            "NetCDF, HDF5, txt, csv, MATLAB) are asked. Each step also holds "
+            "the settings of its last run (settings_…). The list is updated "
+            "after every step.")
         intro.setWordWrap(True)
         layout.addWidget(intro)
+        search_row = QHBoxLayout()
+        search_row.addWidget(QLabel("Search"))
+        self.search = QLineEdit()
+        self.search.setPlaceholderText(
+            "keywords (e.g. fft spectrum, N, channel 1): the variables and "
+            "entries whose name, step or description hold them all")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(lambda *_: self.apply_filter())
+        search_row.addWidget(self.search, 1)
+        self.found = QLabel("")
+        self.found.setStyleSheet("color: gray;")
+        search_row.addWidget(self.found)
+        layout.addLayout(search_row)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setAlternatingRowColors(True)
+        self.tree.setWordWrap(True)
         self.tree.itemChanged.connect(self.update_total)
         layout.addWidget(self.tree, 1)
+        from PySide6.QtWidgets import QTextBrowser
+        self.details = QTextBrowser()
+        self.details.setMaximumHeight(120)
+        self.details.setPlaceholderText(
+            "Select a row: its full description here.")
+        self.tree.currentItemChanged.connect(
+            lambda current, _previous: self.show_details(current))
+        layout.addWidget(self.details)
         self.total = QLabel("")
         self.total.setStyleSheet("color: gray;")
         layout.addWidget(self.total)
@@ -466,22 +496,40 @@ class SaveVariablesDialog(QDialog):
 
     # ---- content ----------------------------------------------------------
     def entries(self):
-        """{category: {name: value}}: every session variable and the
-        physical parameters (one entry each)."""
+        """{category: {name: value}}: one category per step (menu order,
+        every step listed), its variables and the settings of its runs,
+        then the physical parameters and the variables made outside a
+        step."""
         import dts_core
-        out = {category: {} for category in CATEGORIES}
+        order, step_category = self.steps()
+        out = {category: {} for category in order}
+        origin = getattr(self.session, "origin", {})
+        other = {}
         for name, value in self.session.data.items():
-            out[category_of(name)][name] = value
-        for name in dts_core.PHYSICS_DEFAULTS:
-            out["Physical parameters"][name] = dts_core.PHYSICS[name]
+            category = step_category.get(origin.get(name))
+            (out[category] if category in out else other)[name] = value
+        for step, inputs in getattr(self.session, "params_used",
+                                    {}).items():
+            category = step_category.get(step)
+            if category in out and inputs:
+                out[category][settings_name(step)] = {
+                    k: v for k, v in inputs.items() if not k.startswith("_")}
+        out[PHYSICS_CATEGORY] = {name: dts_core.PHYSICS[name]
+                                 for name in dts_core.PHYSICS_DEFAULTS}
+        if other:
+            out[OTHER_CATEGORY] = other
         return out
 
     def _description(self, category, name):
-        if category == "Physical parameters":
+        if category == PHYSICS_CATEGORY:
             import dts_core
             for key, label, unit, *_ in dts_core.PHYSICAL_PARAMETERS:
                 if key == name:
                     return label + (f" ({unit})" if unit else "")
+        if name.startswith(SETTINGS_PREFIX):
+            return (f"Settings of the last run of this step "
+                    f"({name[len(SETTINGS_PREFIX):].replace('_', '.')}): "
+                    "the inputs of its panel")
         return describe_key(name)
 
     def _add(self, parent, path, value, description, level, ticked):
@@ -504,7 +552,7 @@ class SaveVariablesDialog(QDialog):
     def fill(self):
         ticked = set(self.ticked_paths()) if self.tree.topLevelItemCount() \
             else set()
-        expanded = {self.tree.topLevelItem(i).text(0)
+        expanded = {self.tree.topLevelItem(i).text(0).split("  (")[0]
                     for i in range(self.tree.topLevelItemCount())
                     if self.tree.topLevelItem(i).isExpanded()}
         self.tree.blockSignals(True)
@@ -514,31 +562,100 @@ class SaveVariablesDialog(QDialog):
             size = sum(memory(v) for v in variables.values())
             top = QTreeWidgetItem(self.tree, [
                 f"{category}  ({len(variables)})", "", "", "",
-                human_bytes(size)])
+                human_bytes(size) if size else ""])
             font = top.font(0)
             font.setBold(True)
             top.setFont(0, font)
+            top.setToolTip(1, f"the variables of the step {category}")
             top.setFlags(top.flags() | Qt.ItemIsUserCheckable
                          | Qt.ItemIsAutoTristate)
             self.paths[id(top)] = ("__category__", category)
-            names = sorted(variables, key=str.lower)
+            # results first, the settings of the runs last
+            names = sorted(variables, key=lambda n: (
+                n.startswith(SETTINGS_PREFIX), n.lower()))
             for name in names:
                 self._add(top, (name,), variables[name],
                           self._description(category, name), 0, ticked)
             if not names:
                 top.setCheckState(0, Qt.Unchecked)
                 top.setDisabled(True)
-                top.setText(1, "nothing in memory yet")
-            top.setExpanded(category in expanded or not expanded)
+                top.setText(1, "nothing yet (run this step first)")
+            top.setExpanded(category in expanded)  # steps collapsed first
         self.tree.blockSignals(False)
-        for column, width in enumerate((280, 420, 110, 110, 70)):
+        for column, width in enumerate((330, 420, 110, 110, 70)):
             self.tree.setColumnWidth(column, width)
+        self.apply_filter()
         self.update_total()
+
+    def show_details(self, item):
+        """Full path and description of the row selected."""
+        from html import escape
+        if item is None:
+            self.details.clear()
+            return
+        path, current = [], item
+        while current is not None:
+            path.insert(0, current.text(0).split("  (")[0])
+            current = current.parent()
+        html = "<b>%s</b>" % " &gt; ".join(escape(x) for x in path)
+        info = [x for x in (item.text(2), item.text(3) and "size "
+                            + item.text(3), item.text(4) and "memory "
+                            + item.text(4)) if x]
+        if info:
+            html += " &nbsp; <span style='color: gray;'>%s</span>" % \
+                escape(", ".join(info))
+        own = item.toolTip(1) or item.text(1)
+        html += "<p>%s</p>" % escape(own or "")
+        parent = item.parent()
+        while not own and parent is not None:     # an entry: its variable
+            own = parent.toolTip(1)
+            if own:
+                html += "<p style='color: gray;'>In: %s</p>" % escape(own)
+            parent = parent.parent()
+        self.details.setHtml(html)
+
+    def apply_filter(self, *_):
+        """Show the entries whose name, step, parent names or description
+        hold every keyword of the search field (case ignored); their parents
+        are shown and opened, and a match shows all its entries."""
+        words = self.search.text().lower().split()
+
+        def show(item):
+            item.setHidden(False)
+            for i in range(item.childCount()):
+                show(item.child(i))
+
+        def visit(item, context):
+            text = (context + " " + item.text(0).lower() + " "
+                    + item.text(1).lower() + " " + item.toolTip(1).lower())
+            if all(word in text for word in words):
+                show(item)
+                return True
+            hit = False
+            for i in range(item.childCount()):
+                hit = visit(item.child(i), text) or hit
+            item.setHidden(not hit)
+            if hit and words:
+                item.setExpanded(True)
+            return hit
+        n = 0
+        for i in range(self.tree.topLevelItemCount()):
+            top = self.tree.topLevelItem(i)
+            if not words:
+                show(top)
+            elif visit(top, ""):
+                n += 1
+        self.found.setText(f"{n} step(s) match" if words else "")
+
+    def _shown(self, item):
+        while item is not None:
+            if item.isHidden():
+                return False
+            item = item.parent()
+        return True
 
     def collapse(self):
         self.tree.collapseAll()
-        for i in range(self.tree.topLevelItemCount()):
-            self.tree.topLevelItem(i).setExpanded(True)
 
     # ---- ticks ------------------------------------------------------------
     def _leaves(self, item=None):
@@ -563,8 +680,11 @@ class SaveVariablesDialog(QDialog):
         return sorted({path[0] for path in self.ticked_paths()})
 
     def tick_all(self, on):
+        """All / None: every entry shown (with a search: those found)."""
         self.tree.blockSignals(True)
         for item in self._leaves():
+            if not self._shown(item):
+                continue
             item.setCheckState(0, Qt.Checked if on else Qt.Unchecked)
         self.tree.blockSignals(False)
         self.fill()                       # parents follow (tristate)
@@ -586,8 +706,9 @@ class SaveVariablesDialog(QDialog):
     def selection(self):
         """{name: value} of the entries ticked; a dictionary keeps only its
         entries ticked (nested)."""
+        entries = self.entries()
         values = {}
-        for variables in self.entries().values():
+        for variables in entries.values():
             values.update(variables)
         out = {}
         for path in self.ticked_paths():
@@ -600,7 +721,7 @@ class SaveVariablesDialog(QDialog):
             target[path[-1]] = value
         # physical parameters: one group
         physics = {n: out.pop(n) for n in list(out)
-                   if n in self.entries()["Physical parameters"]
+                   if n in entries[PHYSICS_CATEGORY]
                    and n not in self.session.data}
         if physics:
             out[PHYSICS_ENTRY] = physics

@@ -698,12 +698,18 @@ they are opened; <i>File › Reset all</i> puts them back to the defaults.</li>
 
 <h2>Advanced › Save variables…</h2>
 <ul>
-<li>Every variable in memory, in four categories: <b>Preprocessing
-variables</b> (the variables without the prefix A_), <b>Analysis
-variables</b> (A_…), <b>Physical parameters</b> (one entry per parameter)
-and <b>STC variables</b> (the STC profiles read: A_STC). Each line shows the
-description, format, size and memory.</li>
-<li>Tick boxes at every level: a category ticks all its variables, a
+<li>Every variable in memory, <b>grouped by step</b> (<i>menu &gt;
+step</i>, in the order of the menus): a variable belongs to the step that
+first made it. Every step is listed, also before it is run ("nothing yet");
+the steps start closed. Each step also holds the settings of its last runs
+(<i>settings_&lt;step&gt;</i>: the inputs of its panel). The physical
+parameters form the group <b>Advanced &gt; Physical parameters</b>.
+Each line shows the description, format, size and memory.</li>
+<li><b>Search</b>: keywords (e.g. <i>fft spectrum</i>); only the variables
+and entries whose name, step or description hold them all are shown, and
+<i>All</i> / <i>None</i> then act on these only. The box below the list
+gives the full path and description of the row selected.</li>
+<li>Tick boxes at every level: a step ticks all its variables, a
 variable ticks all its entries, and every entry of a dictionary variable
 (a channel, an STC profile, …, down to three levels) has its own box; a
 partly ticked box shows that only some entries are chosen. Buttons

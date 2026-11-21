@@ -46,7 +46,7 @@ from gui_sections import MENUS, all_groups                 # noqa: E402
 from gui_widgets import FigurePanel, ParameterPanel        # noqa: E402
 import gui_widgets                                         # noqa: E402
 
-VERSION = "3.36"
+VERSION = "3.37"
 VERSION_DATE = "16.11.2026"
 dts_steps.core.WRITER = f"DTS GUI v{VERSION}"
 
@@ -879,13 +879,37 @@ class MainWindow(QMainWindow):
         import gui_variables
         dialog = getattr(self, "_save_variables_dialog", None)
         if dialog is None:
-            dialog = gui_variables.SaveVariablesDialog(self.session, self,
-                                                       self.write_log)
+            dialog = gui_variables.SaveVariablesDialog(
+                self.session, self, self.write_log,
+                steps=self.variable_steps)
             self._save_variables_dialog = dialog
         dialog.session = self.session          # new after Reset all
         dialog.fill()
         dialog.setModal(False)
         dialog.show()
+
+    def variable_steps(self):
+        """Steps of Save variables: ('Menu > step' in the menu order,
+        {step key: 'Menu > step'}) for every step and action of the GUI."""
+        order, category = [], {}
+        for menu, sections in MENUS:
+            for section in sections:
+                label = f"{menu.replace('&', '')} > {section['title']}"
+                order.append(label)
+        for key in list(dts_steps.STEPS) + list(self.section_by_id):
+            owner = dts_steps.FIGURE_OWNER.get(key, key)
+            for candidate in (key, owner):
+                section_id = self.panel_of_step.get(candidate)
+                if section_id is None and candidate in self.section_by_id:
+                    section_id = candidate
+                if section_id is not None:
+                    menu = next(m for m, sections in MENUS
+                                if any(s["id"] == section_id
+                                       for s in sections))
+                    category[key] = (f"{menu.replace('&', '')} > "
+                                     f"{self.section_by_id[section_id]['title']}")
+                    break
+        return order, category
 
     def show_channel_info(self, name):
         """(?) next to a channel: how the channel is built."""
